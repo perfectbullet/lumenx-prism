@@ -13,6 +13,19 @@ class EntityExtractionError(RuntimeError):
         super().__init__(code)
 
 
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('Duplicate JSON key')
+        result[key] = value
+    return result
+
+
+def _reject_constant(value):
+    raise ValueError('Non-JSON numeric constant')
+
+
 def parse_entity_output(content: str) -> EntityExtractionResult:
     try:
         content = content.strip()
@@ -21,7 +34,9 @@ def parse_entity_output(content: str) -> EntityExtractionResult:
             if len(lines) < 3 or lines[-1].strip() != '```':
                 raise ValueError('Incomplete JSON fence')
             content = '\n'.join(lines[1:-1])
-        return EntityExtractionResult.model_validate(json.loads(content))
+        data = json.loads(content, object_pairs_hook=_unique_object,
+                          parse_constant=_reject_constant)
+        return EntityExtractionResult.model_validate(data)
     except (AttributeError, TypeError, ValueError, ValidationError):
         raise EntityExtractionError('invalid_model_output') from None
 
