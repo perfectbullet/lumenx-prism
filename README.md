@@ -5,7 +5,7 @@
 ## 项目边界
 
 - 目录：`/home/zj/aigc/lumenx-prism`，独立 Git 仓库、虚拟环境、环境文件与发布生命周期。
-- 当前 LumenX 后端通过 `POST /v1/scripts/extract-entities` 调用，Prism 不导入业务代码或直接修改项目/资产。
+- LumenX 后端支持通过 `POST /v1/scripts/extract-entities` 调用 Prism；仅在配置远端地址后启用，默认仍使用业务仓库内兼容实现。Prism 不导入业务代码或直接修改项目/资产。
 - AI 输出临时实体编号；正式 UUID、系列/服装变体关联、持久化和业务鉴权由 LumenX 负责。
 - 原 LumenX 内的 `src/ai_service` 暂留为兼容副本，尚未删除；后续 AI 能力开发在 Prism 中进行。删除兼容副本需要后端改造与单独验收，不能直接移动目录让原业务导入失效。
 
@@ -33,6 +33,10 @@ python3 -m venv .venv
 输出 `characters`、`scenes`、`props` 三个数组，字段契约见 `src/lumenx_prism/schemas.py`。文本为 1～80000 个字符，自定义提示词最多 30000 字符。自定义模板含 `{text}` 时替换，否则在末尾追加原文。
 
 服务配置 `AI_SERVICE_API_KEY` 后，请求携带 `Authorization: Bearer <token>`。请求错误 422；服务鉴权错误 401；模型未配置 503；上游失败或非法输出 502。原始 provider 错误、脚本及密钥不会放入错误响应。
+
+调用流程：请求校验与服务 token 鉴权 → 构建默认/自定义提示词 → OpenAI 兼容模型接口 → JSON 解析 → Pydantic 校验 → 返回推理 DTO。支持纯 JSON 和完整 Markdown 代码围栏；重复 JSON 字段、NaN/Infinity、缺失数组、非法实体及重复引用编号返回 `502 invalid_model_output`。不自动修补截断输出或重新发起推理。结构校验不能识别语义幻觉，仍需样本评测。
+
+默认提示词仅提取原文明示信息，未知属性留空；服装变体使用 `原名 (服装)` 命名，供业务端关联。自定义提示词会替换默认规则，使用时需要自行保留这些约束。
 
 LumenX 后端如需接入，单独在它自己的私密配置中设置：
 
@@ -71,11 +75,22 @@ docker compose --env-file .env -f compose.database.yml up -d
 
 打开同级 `../lumenx-prism.code-workspace`，同时显示 `LumenX` 和 `LumenX Prism`；两个文件夹各自保有 Git 仓库和解释器。F5 可分别启动业务后端或 Prism，工作区任务可执行 Prism 测试。
 
+安装 VS Code Python、Python Debugger 扩展。在 Prism 文件中执行 `Python: Select Interpreter`，选择 Prism 的 `.venv/bin/python`。本项目 `.vscode/settings.json` 已配置 pytest 和 `src` 分析路径。
+
+- 启动：终端执行上面的 uvicorn 命令，或运行任务 `Prism: dev server`，仅监听 `127.0.0.1:17178`。
+- 调试：在运行和调试下拉框选择 `Prism: FastAPI (17178)` 再按 F5；先停止占用该端口的开发服务。在 `api.py` 的 `extract_entities`、`extraction.py` 的 `extract` / `parse_entity_output` 设置断点。此配置读取 Prism 自己的 `.env`；不要选择业务后端配置。
+- 测试：运行任务 `Prism: tests`，或使用 Testing 面板运行/调试测试；后者可逐步跟踪模拟模型，无需配置模型密钥。工作区文件为本机配置，不属于此仓库。
+- `/docs` 中配置了服务 token 时须先点 Authorize；提交提取请求会调用已配置的真实 provider，不能用作免费冒烟检查。`/health` 不检查模型可用性。
+
 ```bash
 .venv/bin/python -m pytest
+# 只运行中文样本回放与解析回归（无需真实模型）
+.venv/bin/python -m pytest tests/test_chinese_sample.py tests/test_output_parsing.py
 ```
 
 测试覆盖 JSON/实体契约、鉴权、错误脱敏、provider fallback，以及复制应用到临时目录后启动真实 HTTP 服务对接本机模拟模型；不调用付费 API。代码不依赖 ../lumenx，不提交个人工作材料。
+
+中文剧本、参考实体及评测标准见 [实体提取评测](docs/entity-extraction-evaluation.md)。测试不会自动加载 `.env`，无需新增依赖。部分受限沙箱无法运行 TestClient/回环 HTTP 测试，应在允许本机回环通信的终端执行。运行时默认模型顺序由 `llm_adapter.py` 定义；测试仅验证回退行为，不确认这些模型在线可用。
 
 ## 231 状态（2026-10-27）
 
