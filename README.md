@@ -4,7 +4,7 @@
 
 ## 项目边界
 
-- 目录：`/home/zj/aigc/lumenx-prism`，独立 Git 仓库、虚拟环境、环境文件与发布生命周期。
+- 目录：`/home/zj/aigc/lumenx-prism`，独立 Git 仓库、Conda 环境、环境文件与发布生命周期。
 - LumenX 后端支持通过 `POST /v1/scripts/extract-entities` 调用 Prism；仅在配置远端地址后启用，默认仍使用业务仓库内兼容实现。Prism 不导入业务代码或直接修改项目/资产。
 - AI 输出临时实体编号；正式 UUID、系列/服装变体关联、持久化和业务鉴权由 LumenX 负责。
 - 原 LumenX 内的 `src/ai_service` 暂留为兼容副本，尚未删除；后续 AI 能力开发在 Prism 中进行。删除兼容副本需要后端改造与单独验收，不能直接移动目录让原业务导入失效。
@@ -19,8 +19,8 @@ python -m pip install --index-url https://pypi.tuna.tsinghua.edu.cn/simple -r re
 python -m uvicorn lumenx_prism.api:app --app-dir src --env-file .env --host 127.0.0.1 --port 17178 --reload
 ```
 
-调试页 http://127.0.0.1:17178/docs；`GET /health` 返回 service=lumenx-prism，仅表示存活。
-模型凭据不从同级业务项目继承。`.env` 为本地受限文件，首次准备时未复制任何真实模型凭据；配置凭据后才能成功提取。
+实体提取测试台 http://127.0.0.1:17178/tools/entities （根路径 `/` 也可打开）；API 文档 http://127.0.0.1:17178/docs；`GET /health` 返回 service=lumenx-prism，仅表示存活。
+模型凭据不从同级业务项目继承。`.env` 为本地受限文件。使用 OpenAI 兼容服务时配置 `LLM_PROVIDER=openai`、`OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`；修改环境文件后需要重启进程，`--reload` 不保证重新读取 `.env`。
 
 ## HTTP 接口与接入
 
@@ -47,29 +47,40 @@ AI_SERVICE_API_KEY=与Prism匹配的服务token
 
 当前没有自动改写 LumenX 的配置或线上服务。未配置远端时，LumenX 继续运行兼容实现。跨容器/机器需替换为业务可达地址，不能照抄回环地址。
 
-## 数据库隔离
+## 测试页面
 
-**当前实体提取接口无状态，不连接任何数据库，也不保存剧本或提取结果。** 独立项目未复制业务库、媒体文件和账号凭据。
+1. 启动服务后打开 `/tools/entities`，输入 Prism 自己的 `AI_SERVICE_API_KEY`，点击“连接服务”。令牌仅留在页面内存，不写入浏览器存储；服务端模型密钥不返回浏览器。
+2. 粘贴剧本或“载入中文样本”，可展开自定义提示词。只有点击“提取实体”或按 Ctrl/⌘+Enter 才会调用真实模型，可能产生费用。加载页面、样本、配置与历史不会调用模型。
+3. 检查角色/场景/道具卡片与原始 JSON；历史支持状态筛选、分页、详情和恢复输入。恢复输入不会提交。
+4. 历史与提取沿用同一 Bearer token 鉴权。未设置 token 时这些接口均无鉴权，请保持回环监听。页面无外部 CDN 依赖。
 
-为后续任务/实验记录预留了专用 MongoDB 编排 `compose.database.yml`：
+## 数据库与实验历史
 
-| 项目 | Prism 专用值 |
-|---|---|
-| Compose 项目 | lumenx-prism |
-| MongoDB 实例 | 独立 mongo:7.0 容器，不复用 CosyVoice/LumenX 实例 |
-| 主机端口 | 127.0.0.1:27019，容器端口 27017 |
-| 数据库 / authSource | lumenx_prism |
-| 应用用户 | prism_app，仅有此库 readWrite |
-| 数据卷 | lumenx-prism-mongodb-data |
-| 配置来源 | Prism 自己的 .env 与 PRISM_* 变量 |
+按当前部署方案，Prism 使用现有 MongoDB 实例，以独立数据库 `lumenx_prism` 和账号 `prism_app` 做数据库级隔离，不启动单独 MongoDB 容器。连接信息只放 Prism 自己的 `.env`：
 
-该数据库尚未启动，应用也未接入持久化。本机 WSL 尚无可用 Docker（未启用 Docker Desktop WSL 集成），当前只做了编排静态校验；需要可用 Docker/Compose 后才能启动。需要时先检查目标机器端口，设置独立的 root/app 密码，再手动运行：
-
-```bash
-docker compose --env-file .env -f compose.database.yml up -d
+```dotenv
+PRISM_MONGODB_URI=mongodb://prism_app:<URL_ENCODED_PASSWORD>@<mongo-host>:27017/lumenx_prism?authSource=lumenx_prism
+PRISM_MONGODB_DATABASE=lumenx_prism
 ```
 
-初始化脚本只在空数据卷执行。修改 `.env` 不会修改已有数据库用户密码，不删除数据卷来重置密码。root 仅用于初始化/维护，未来应用使用 prism_app；URI 密码需 URL 编码。不得填入 lumenxdb、tts_mongodb 或业务库连接串。
+应用仅允许选择 `lumenx_prism` 数据库。`authSource` 指定用户认证库；URI 密码需要 URL 编码。安装依赖后，首次有效提取会自动创建 `entity_extraction_runs` 集合及时间排序索引，不需要手动创建表或运行初始化脚本。
+
+记录格式 `schema_version=1`：UUID 作为实验编号（不是业务实体 UUID），UTC 创建/完成时间、`running/succeeded/failed` 状态、正文与自定义提示词、实际组装提示词及 SHA256、provider、请求配置模型、耗时、校验后结果或安全错误码。`requested_model` 是请求配置，并不保证代表回退链最终使用的模型。不记录鉴权头、模型密钥、连接串或原始 provider 异常。正文和提示词为完整明文，保留至运维按自身策略清理；当前无自动过期、历史删除或业务项目写入。
+
+- 配置 URI 后：先持久化通过校验的输入，再调用模型。初始写入失败返回 `503 history_unavailable`，不会调用模型。非法输入和未授权请求不留历史。
+- 完成后更新结果；若回写失败，保留原输入及 `running` 状态，并在原响应增加 `X-Prism-History-Warning: finalize_failed`，不丢弃已生成结果、不重试模型。请复制结果留存。服务中断也可能留下 `running` 记录，该状态不表示后台任务一定仍在执行。
+- 未配置 URI：原提取接口继续工作，但不保存历史，页面明确提示。历史接口返回 `503 history_not_configured`。配置错误返回 `503 history_configuration_error`。
+- 原接口成功响应结构仍为三个实体数组；已创建记录时增加响应头 `X-Prism-History-Id`，便于关联成功或失败请求。
+
+历史查询（均需相同服务 token）：
+
+```text
+GET /v1/scripts/extract-entities/history?limit=20&offset=0&status=succeeded
+GET /v1/scripts/extract-entities/history/{id}
+GET /v1/test-console/config
+```
+
+列表每页1～100条，offset 0～10000；`status` 可省略，或为 `running`、`succeeded`、`failed`。列表仅返回摘要，详情返回完整输入/提示词/结果，返回 `Cache-Control: no-store`。不存在的记录返回404。配置接口只返回模型名、provider、配置是否存在，不返回密钥或 provider 地址；配置存在不代表上游在线。
 
 ## VS Code 与测试
 
@@ -88,10 +99,10 @@ python -m pytest
 python -m pytest tests/test_chinese_sample.py tests/test_output_parsing.py
 ```
 
-测试覆盖 JSON/实体契约、鉴权、错误脱敏、provider fallback，以及复制应用到临时目录后启动真实 HTTP 服务对接本机模拟模型；不调用付费 API。代码不依赖 ../lumenx，不提交个人工作材料。
+测试覆盖 JSON/实体契约、鉴权、错误脱敏、provider fallback、模拟历史仓库及控制台资源，以及复制应用到临时目录后启动真实 HTTP 服务对接本机模拟模型；不调用付费 API。自动化测试屏蔽真实 MongoDB URI。代码不依赖 ../lumenx，不提交个人工作材料。
 
-中文剧本、参考实体及评测标准见 [实体提取评测](docs/entity-extraction-evaluation.md)。测试不会自动加载 `.env`，无需新增依赖。部分受限沙箱无法运行 TestClient/回环 HTTP 测试，应在允许本机回环通信的终端执行。运行时默认模型顺序由 `llm_adapter.py` 定义；测试仅验证回退行为，不确认这些模型在线可用。
+中文剧本、参考实体及评测标准见 [实体提取评测](docs/entity-extraction-evaluation.md)。测试不会自动加载 `.env`；依赖包括 `pymongo`，安装命令见上文。部分受限沙箱无法运行 TestClient/回环 HTTP 测试，应在允许本机回环通信的终端执行。运行时默认模型顺序由 `llm_adapter.py` 定义；测试仅验证回退行为，不确认这些模型在线可用。
 
-## 231 状态（2026-10-27）
+## 环境边界
 
-仅原 `src/ai_service` 源码随业务项目同步到了231；检查时17178没有服务，业务后端也未配置远端提取。Prism 独立项目及专用数据库尚未部署到231，本次不自动部署或修改现有运行服务。
+231 为测试环境，生产为另行管理的 LumenX 服务。Prism 的页面与历史功能在当前仓库内运行，不会自动部署或切换 LumenX 业务调用。业务仓库的 `src/ai_service` 仍有导入依赖，不能直接删除。
