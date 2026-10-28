@@ -19,3 +19,6 @@ where = ["src"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q --tb=short"
+
+[tool.setuptools.package-data]
+lumenx_prism = ["static/*"]

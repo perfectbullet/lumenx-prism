@@ -3,10 +3,13 @@ import os
 import secrets
 import time
 import logging
+from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Response, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .history import MongoHistory
@@ -17,6 +20,16 @@ from .schemas import EntityExtractionRequest, EntityExtractionResult
 app = FastAPI(title='LumenX Prism', version='0.1.0')
 bearer = HTTPBearer(auto_error=False)
 logger = logging.getLogger(__name__)
+static = Path(__file__).parent / 'static'
+app.mount('/static', StaticFiles(directory=static), name='static')
+
+
+@app.get('/', include_in_schema=False)
+@app.get('/tools/entities', include_in_schema=False)
+def test_page():
+    return FileResponse(static / 'entities.html', headers={'Cache-Control': 'no-store'})
+
+
 def get_history():
     uri = os.getenv('PRISM_MONGODB_URI', '').strip()
     if not uri:
