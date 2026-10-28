@@ -3,6 +3,7 @@ import json
 
 from pydantic import ValidationError
 
+from .model_configs import ModelConfigs
 from .prompts import build_entity_prompt
 from .schemas import EntityExtractionRequest, EntityExtractionResult
 
@@ -44,6 +45,7 @@ def parse_entity_output(content: str) -> EntityExtractionResult:
 class EntityExtractor:
     def __init__(self, llm):
         self.llm = llm
+        self.model_snapshot = ModelConfigs.snapshot(llm.config) if isinstance(getattr(llm, 'config', None), dict) else None
 
     def extract(self, request: EntityExtractionRequest) -> EntityExtractionResult:
         if not self.llm.is_configured:

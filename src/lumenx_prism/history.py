@@ -1,7 +1,6 @@
 """Prism-only inference experiments, separate from business projects/assets."""
 from datetime import datetime, timezone
 import hashlib
-import os
 from uuid import uuid4
 
 from pymongo import MongoClient, DESCENDING
@@ -24,7 +23,7 @@ class MongoHistory:
     def close(self):
         self.client.close()
 
-    def begin(self, request):
+    def begin(self, request, model_snapshot=None):
         prompt = build_entity_prompt(request.text, request.custom_extraction_prompt)
         record = {
             '_id': str(uuid4()), 'schema_version': 1,
@@ -33,21 +32,21 @@ class MongoHistory:
             'request': request.model_dump(), 'effective_prompt': prompt,
             'prompt_sha256': hashlib.sha256(prompt.encode()).hexdigest(),
             'text_preview': request.text[:100], 'text_length': len(request.text),
-            'provider': os.getenv('LLM_PROVIDER', 'dashscope').lower(),
-            'requested_model': (os.getenv('OPENAI_MODEL', 'gpt-4o')
-                                if os.getenv('LLM_PROVIDER', 'dashscope').lower() == 'openai'
-                                else 'provider-default-fallback'),
+            'model_config': model_snapshot,
+            'provider': (model_snapshot or {}).get('provider'),
+            'requested_model': (model_snapshot or {}).get('model'),
             'result': None, 'error_code': None,
         }
         self.collection.create_index([('created_at', DESCENDING), ('_id', DESCENDING)])
         self.collection.insert_one(record)
         return record['_id']
 
-    def finish(self, record_id, *, result=None, error_code=None, duration_ms):
+    def finish(self, record_id, *, result=None, error_code=None, duration_ms, actual_model=None, usage=None):
         update = self.collection.update_one({'_id': record_id}, {'$set': {
             'status': 'failed' if error_code else 'succeeded',
             'finished_at': datetime.now(timezone.utc), 'duration_ms': duration_ms,
             'result': result, 'error_code': error_code,
+            'actual_model': actual_model, 'usage': usage,
         }})
         if update.matched_count != 1:
             raise HistoryUnavailable('history_record_missing')

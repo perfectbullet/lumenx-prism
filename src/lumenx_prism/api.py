@@ -7,17 +7,29 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Response, Query
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, HTTPException, Response, Query, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .history import MongoHistory
+from .model_configs import ModelConfigs, ModelConfigInput, ConfigError
 from .extraction import EntityExtractionError, EntityExtractor
 from .llm_adapter import LLMAdapter
 from .schemas import EntityExtractionRequest, EntityExtractionResult
 
 app = FastAPI(title='LumenX Prism', version='0.1.0')
+@app.exception_handler(RequestValidationError)
+async def safe_config_validation(request: Request, exc: RequestValidationError):
+    if request.url.path.startswith('/v1/model-configs'):
+        return JSONResponse(status_code=422, content={'detail': [
+            {k: error[k] for k in ('type', 'loc', 'msg')} for error in exc.errors()
+        ]}, headers={'Cache-Control': 'no-store'})
+    return await request_validation_exception_handler(request, exc)
+
+
 bearer = HTTPBearer(auto_error=False)
 logger = logging.getLogger(__name__)
 static = Path(__file__).parent / 'static'
@@ -60,13 +72,66 @@ def require_service_auth(credentials: HTTPAuthorizationCredentials | None = Depe
         raise HTTPException(status_code=401, detail={'code': 'unauthorized'})
 
 
-def get_extractor():
-    adapter = LLMAdapter(timeout=120, max_retries=0)
+def config_operation(operation):
+    try:
+        return operation()
+    except ConfigError as exc:
+        raise HTTPException(exc.status, detail={'code': exc.code}) from None
+    except Exception:
+        raise HTTPException(503, detail={'code': 'model_config_unavailable'}) from None
+
+
+def get_model_configs(history=Depends(get_history)):
+    if history is None:
+        raise HTTPException(503, detail={'code': 'model_database_not_configured'})
+    return ModelConfigs(history.client['lumenx_prism'])
+
+
+def get_extractor(configs=Depends(get_model_configs)):
+    config = config_operation(configs.resolve_entity_model)
+    adapter = LLMAdapter(config, timeout=120, max_retries=0)
     try:
         yield EntityExtractor(adapter)
     finally:
         if adapter._client is not None:
             adapter._client.close()
+
+
+@app.get('/tools/models', include_in_schema=False)
+def model_page():
+    return FileResponse(static / 'models.html', headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/v1/model-configs', dependencies=[Depends(require_service_auth)])
+def list_model_configs(response: Response, limit: int = Query(50, ge=1, le=100),
+                       offset: int = Query(0, ge=0, le=10000), configs=Depends(get_model_configs)):
+    response.headers['Cache-Control'] = 'no-store'
+    return config_operation(lambda: configs.list(limit, offset))
+
+
+@app.post('/v1/model-configs', status_code=201, dependencies=[Depends(require_service_auth)])
+def create_model_config(payload: ModelConfigInput, response: Response, configs=Depends(get_model_configs)):
+    response.headers['Cache-Control'] = 'no-store'
+    return config_operation(lambda: configs.save(payload))
+
+
+@app.get('/v1/model-configs/{config_id}', dependencies=[Depends(require_service_auth)])
+def get_model_config(config_id: UUID, response: Response, configs=Depends(get_model_configs)):
+    response.headers['Cache-Control'] = 'no-store'
+    return config_operation(lambda: configs.public(configs.get(str(config_id))))
+
+
+@app.put('/v1/model-configs/{config_id}', dependencies=[Depends(require_service_auth)])
+def update_model_config(config_id: UUID, payload: ModelConfigInput, response: Response,
+                        configs=Depends(get_model_configs)):
+    response.headers['Cache-Control'] = 'no-store'
+    return config_operation(lambda: configs.save(payload, str(config_id)))
+
+
+@app.put('/v1/model-configs/{config_id}/entity-extraction', dependencies=[Depends(require_service_auth)])
+def bind_model_config(config_id: UUID, response: Response, configs=Depends(get_model_configs)):
+    response.headers['Cache-Control'] = 'no-store'
+    return config_operation(lambda: configs.bind_entity_model(str(config_id)))
 
 
 @app.get('/health')
@@ -76,12 +141,12 @@ def health():
 
 
 @app.get('/v1/test-console/config', dependencies=[Depends(require_service_auth)])
-def console_config(response: Response):
+def console_config(response: Response, configs=Depends(get_model_configs)):
     response.headers['Cache-Control'] = 'no-store'
-    adapter = LLMAdapter()
-    return {'provider': adapter.provider, 'model': adapter._get_default_model(),
-            'model_configured': adapter.is_configured,
-            'history_configured': bool(os.getenv('PRISM_MONGODB_URI', '').strip())}
+    config = config_operation(configs.resolve_entity_model)
+    return {'provider': config['provider'], 'model': config['model'],
+            'model_configured': True, 'history_configured': True,
+            'model_config_id': config['_id'], 'model_revision': config['revision']}
 
 
 @app.get('/v1/scripts/extract-entities/history', dependencies=[Depends(require_service_auth)])
@@ -115,7 +180,7 @@ def extract_entities(request: EntityExtractionRequest, response: Response,
     # Persist valid input before inference. Never silently lose an input then incur cost.
     response.headers['Cache-Control'] = 'no-store'
     started = time.monotonic()
-    record_id = history_operation(lambda: history.begin(request)) if history is not None else None
+    record_id = history_operation(lambda: history.begin(request, model_snapshot=getattr(extractor, 'model_snapshot', None))) if history is not None else None
     if record_id:
         response.headers['X-Prism-History-Id'] = record_id
     headers = {'X-Prism-History-Id': record_id} if record_id else {}
@@ -124,7 +189,9 @@ def extract_entities(request: EntityExtractionRequest, response: Response,
         if record_id:
             try:
                 history.finish(record_id, result=result, error_code=error_code,
-                               duration_ms=round((time.monotonic() - started) * 1000))
+                               duration_ms=round((time.monotonic() - started) * 1000),
+                               actual_model=getattr(extractor.llm, 'actual_model', None),
+                               usage=getattr(extractor.llm, 'usage', None))
             except Exception:
                 # Input is durable already. Keep inference result; never suggest a paid retry.
                 headers['X-Prism-History-Warning'] = 'finalize_failed'

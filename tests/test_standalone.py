@@ -43,13 +43,27 @@ def test_copied_service_runs_without_business_source(tmp_path, monkeypatch):
     root = Path(__file__).resolve().parents[1]
     shutil.copytree(root / 'src/lumenx_prism', tmp_path / 'lumenx_prism',
                     ignore=shutil.ignore_patterns('__pycache__'))
-    env = dict(os.environ, LLM_PROVIDER='openai', OPENAI_API_KEY='fake-local-key',
-               OPENAI_BASE_URL=f'http://127.0.0.1:{provider.server_port}/v1',
-               OPENAI_MODEL='test-model', AI_SERVICE_API_KEY='internal-token',
+    # Seed a fake DB in the child; runtime still resolves its config through the DB repository.
+    model_config = dict(name='本机模型', kind='text', provider='test-provider', protocol='openai_chat',
+                        model='test-model', base_url=f'http://127.0.0.1:{provider.server_port}/v1',
+                        api_key='fake-local-key')
+    (tmp_path / 'seed.json').write_text(json.dumps(model_config))
+    (tmp_path / 'launcher.py').write_text("""
+import json
+from pathlib import Path
+import mongomock
+from lumenx_prism.api import app, get_model_configs
+from lumenx_prism.model_configs import ModelConfigs, ModelConfigInput
+repo = ModelConfigs(mongomock.MongoClient()['lumenx_prism'])
+created = repo.save(ModelConfigInput.model_validate(json.loads(Path('seed.json').read_text())))
+repo.bind_entity_model(created['id'])
+app.dependency_overrides[get_model_configs] = lambda: repo
+""")
+    env = dict(os.environ, OPENAI_MODEL='wrong-env-model', AI_SERVICE_API_KEY='internal-token',
                NO_PROXY='127.0.0.1,localhost', no_proxy='127.0.0.1,localhost')
     env.pop('PYTHONPATH', None)
     process = subprocess.Popen(
-        [sys.executable, '-m', 'uvicorn', 'lumenx_prism.api:app', '--host', '127.0.0.1',
+        [sys.executable, '-m', 'uvicorn', 'launcher:app', '--host', '127.0.0.1',
          '--port', str(port)], cwd=tmp_path, env=env,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )

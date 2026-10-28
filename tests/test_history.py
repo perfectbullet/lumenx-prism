@@ -113,7 +113,7 @@ def test_mongo_record_is_replayable_without_credentials(monkeypatch):
     repo.collection.update_one.return_value.matched_count = 1
     repo.collection.insert_one.side_effect = lambda row: None
     request = EntityExtractionRequest(text='中文剧本', custom_extraction_prompt='分析 {text}')
-    record_id = repo.begin(request)
+    record_id = repo.begin(request, model_snapshot={'id': 'test', 'revision': 1, 'provider': 'openai', 'model': 'test-model'})
     row = deepcopy(repo.collection.insert_one.call_args.args[0])
     assert row['_id'] == record_id
     assert row['request'] == request.model_dump()
