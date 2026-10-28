@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Response, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Response, Query, Request, Header
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.responses import FileResponse, JSONResponse
@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .history import MongoHistory
+from .jobs import Jobs
 from .model_configs import ModelConfigs, ModelConfigInput, ConfigError
 from .extraction import EntityExtractionError, EntityExtractor
 from .llm_adapter import LLMAdapter
@@ -206,3 +207,49 @@ def extract_entities(request: EntityExtractionRequest, response: Response,
                             detail={'code': exc.code}, headers=headers) from None
     finish(result=result.model_dump())
     return result
+
+
+# Additive async contract; the legacy synchronous endpoint remains unchanged.
+def get_jobs(history=Depends(get_history)):
+    if history is None:
+        raise HTTPException(503, detail={'code': 'model_database_not_configured'})
+    return Jobs(history.client['lumenx_prism'])
+
+
+def job_operation(operation):
+    try:
+        return operation()
+    except ConfigError as exc:
+        raise HTTPException(exc.status, detail={'code': exc.code}) from None
+    except Exception:
+        raise HTTPException(503, detail={'code': 'job_store_unavailable'}) from None
+
+
+@app.post('/v1/scripts/extract-entities/jobs', status_code=202,
+          dependencies=[Depends(require_service_auth)])
+def submit_entity_job(payload: EntityExtractionRequest, response: Response,
+                      idempotency_key: str = Header(min_length=1, max_length=128),
+                      jobs=Depends(get_jobs), configs=Depends(get_model_configs)):
+    response.headers['Cache-Control'] = 'no-store'
+    # A retried submission must succeed even if the binding changed since acceptance.
+    row = job_operation(lambda: jobs.existing(idempotency_key, payload))
+    if row is None:
+        config = config_operation(configs.resolve_entity_model)
+        row = job_operation(lambda: jobs.submit(payload, idempotency_key, config))
+    response.headers['Location'] = '/v1/jobs/' + row['id']
+    return row
+
+
+@app.get('/v1/jobs', dependencies=[Depends(require_service_auth)])
+def list_jobs(response: Response, limit: int = Query(20, ge=1, le=100),
+              offset: int = Query(0, ge=0, le=10000),
+              status: Literal['queued', 'running', 'succeeded', 'failed'] | None = None,
+              jobs=Depends(get_jobs)):
+    response.headers['Cache-Control'] = 'no-store'
+    return job_operation(lambda: jobs.list(limit, offset, status))
+
+
+@app.get('/v1/jobs/{job_id}', dependencies=[Depends(require_service_auth)])
+def job_detail(job_id: UUID, response: Response, jobs=Depends(get_jobs)):
+    response.headers['Cache-Control'] = 'no-store'
+    return job_operation(lambda: jobs.get(str(job_id)))
