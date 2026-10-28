@@ -7,8 +7,8 @@
 <script src="/static/entities.js" defer></script>
 </head>
 <body><main>
-<header><div><div class="eyebrow">LUMENX <span>PRISM</span> / SCRIPT LAB</div><h1>剧本实体提取</h1><p class="subtitle">从故事到角色、场景与道具，检查每一处细节。</p></div><a href="/docs" target="_blank" rel="noopener">接口文档 ↗</a></header>
-<section class="card connection"><div><label for="token">服务访问令牌 · AI_SERVICE_API_KEY</label><input id="token" type="password" autocomplete="off" placeholder="填写 Prism 服务 token；未配置则留空"></div><button id="connect">连接服务</button><div class="service"><span id="health" class="tag">检查服务中</span><span id="config">模型配置由服务端 .env 管理</span></div><div class="hint full">令牌仅保留在当前页面内存中。模型密钥无需填写，也不会传到浏览器。当前接口：<code>POST /v1/scripts/extract-entities</code></div></section>
+<header><div><div class="eyebrow">LUMENX <span>PRISM</span> / SCRIPT LAB</div><h1>剧本实体提取</h1><p class="subtitle">从故事到角色、场景与道具，检查每一处细节。</p></div><a href="/tools/models">模型配置 ↗</a><a href="/docs" target="_blank" rel="noopener">接口文档 ↗</a></header>
+<section class="card connection"><div><label for="token">服务访问令牌 · AI_SERVICE_API_KEY</label><input id="token" type="password" autocomplete="off" placeholder="填写 Prism 服务 token；未配置则留空"></div><button id="connect">连接服务</button><div class="service"><span id="health" class="tag">检查服务中</span><span id="config">模型配置由 MongoDB 管理</span></div><div class="hint full">令牌仅保留在当前页面内存中。模型密钥无需填写，也不会传到浏览器。当前接口：<code>POST /v1/scripts/extract-entities</code></div></section>
 <div class="workspace">
 <section class="card editor"><div class="section-head"><h2><span class="step">01</span> 剧本输入</h2><button id="sample" class="ghost">载入中文样本</button></div>
 <label for="script">剧本正文 <span id="count">0 / 80000</span></label><textarea id="script" maxlength="80000" placeholder="粘贴中文剧本，保留人物、场景、服装及道具细节…" spellcheck="false"></textarea>

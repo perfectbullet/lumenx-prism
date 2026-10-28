@@ -20,7 +20,8 @@ def test_console_assets_and_safe_metadata(monkeypatch):
             assert response.status_code == 200
             assert '剧本实体提取' in response.text
             assert 'test-token' not in response.text
-        for asset in ['entities.js', 'entities.css', 'sample.json']:
+        assert client.get('/tools/models').status_code == 200
+        for asset in ['entities.js', 'entities.css', 'sample.json', 'models.html', 'models.js', 'models.css']:
             assert client.get('/static/' + asset).status_code == 200
         response = client.get('/v1/test-console/config', headers={'Authorization': 'Bearer test-token'})
         assert response.status_code == 200

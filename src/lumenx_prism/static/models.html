@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>模型配置 · LumenX Prism</title><link rel="stylesheet" href="/static/entities.css"><link rel="stylesheet" href="/static/models.css"><script src="/static/models.js" defer></script></head>
+<body><main>
+<header><div><div class="eyebrow">LUMENX <span>PRISM</span> / MODEL REGISTRY</div><h1>模型配置</h1><p class="subtitle">统一管理文本、语音、图像和视频模型，为每项能力选择合适的模型。</p></div><a href="/tools/entities">← 实体提取测试台</a></header>
+<section class="card connection"><div><label for="token">服务访问令牌 · AI_SERVICE_API_KEY</label><input id="token" type="password" autocomplete="off" placeholder="填写 Prism 服务 token"></div><button id="connect">连接配置库</button><div class="service"><span class="tag" id="connectionState">尚未连接</span><span>配置来源：MongoDB / model_comfigs</span></div><div class="hint full">保存配置、编辑和切换绑定均不会调用模型。保存后下一次提取请求即时生效。模型 API key 在此配置，不再读取环境变量。</div></section>
+<div class="workspace models-workspace">
+<section class="card"><div class="section-head"><h2><span class="step">01</span> <span id="formTitle">新增模型</span></h2><button id="newModel" class="ghost">清空 / 新建</button></div>
+<form id="modelForm"><div class="form-grid">
+<div class="full"><label for="name">配置名称</label><input id="name" required maxlength="100" placeholder="例如：剧本理解主模型"></div>
+<div><label for="kind">模型类型</label><select id="kind"><option value="text">文本模型</option><option value="speech">语音模型</option><option value="image">图像生成模型</option><option value="video">视频生成模型</option></select></div>
+<div><label for="provider">Provider 标识</label><input id="provider" required maxlength="80" value="openai" placeholder="openai / dashscope / 自定义"></div>
+<div class="full"><label for="protocol">接口协议</label><select id="protocol"><option value="openai_chat">OpenAI 兼容 · Chat Completions</option><option value="openai_audio">OpenAI 兼容 · Audio</option><option value="openai_images">OpenAI 兼容 · Images</option><option value="custom_http">自定义 HTTP</option></select></div>
+<div class="full"><label for="model">模型 ID</label><input id="model" required maxlength="200" placeholder="供应商实际支持的模型名称"></div>
+<div class="full"><label for="baseUrl">API Base URL</label><input id="baseUrl" type="url" required placeholder="https://api.example.com/v1"><div class="hint">填写完整 API 根路径；DashScope 示例路径为 /compatible-mode/v1。</div></div>
+<div class="full"><label for="apiKey">API key</label><input id="apiKey" type="password" autocomplete="new-password" placeholder="新增时必填，编辑时留空保留原 key"><div id="keyState" class="hint">API key 保存在 MongoDB，列表和详情不回显原文。</div></div>
+<div class="full"><label for="capabilities">能力标签 · 逗号分隔</label><input id="capabilities" placeholder="例如：entity_extraction, vision, tts, i2v"></div>
+<div class="full"><label for="parameters">调用参数 · JSON 对象</label><textarea id="parameters" spellcheck="false">{}</textarea><div class="hint">文本模型支持 temperature、top_p、max_tokens、max_completion_tokens、seed、response_format 和 extra_body。其他类型保存为后续适配器配置。</div></div>
+<div class="full"><label for="notes">备注</label><textarea id="notes" maxlength="2000" placeholder="用途、效果或供应商说明"></textarea></div>
+<label class="checkbox full"><input id="enabled" type="checkbox" checked> 启用此配置</label>
+</div><div id="formMessage" class="notice" role="status" hidden></div><div class="actions"><button id="save" class="primary" type="submit">保存配置</button><span id="revision" class="hint">新配置</span></div></form>
+</section>
+<section class="card"><div class="section-head"><h2><span class="step">02</span> 模型列表</h2><button id="refresh" class="ghost">刷新</button></div><div class="sample-note" id="binding">连接后查看当前实体提取模型。</div><p class="hint">实体提取当前只支持已启用的文本 + Chat Completions 配置。语音、图像和视频配置可先保存，暂不执行生成。</p><div id="listStatus" role="status">尚未读取配置。</div><div id="models" class="model-list"></div><div class="pagination"><button id="prev" class="ghost" disabled>上一页</button><span id="pageLabel">第 1 页</span><button id="next" class="ghost" disabled>下一页</button></div></section>
+</div><footer>模型配置与用途绑定独立管理 · 保存不触发付费调用 · 服务 token 沿用 Prism 鉴权</footer></main></body></html>

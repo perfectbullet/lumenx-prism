@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const endpoint = '/v1/scripts/extract-entities';
-const errors = {unauthorized:'服务令牌无效，请填写 AI_SERVICE_API_KEY。',not_configured:'模型未配置，请检查服务端 .env 并重启。',upstream_error:'模型调用失败，请检查服务端模型配置。',invalid_model_output:'模型输出未通过 JSON / 实体校验。',history_unavailable:'MongoDB 读写失败，请检查连接、账号权限和网络。未收到结果时请先查看历史，避免重复提交。',history_configuration_error:'数据库配置无效；数据库应为 lumenx_prism。',history_not_configured:'尚未配置 MongoDB，当前不会保存历史。',history_not_found:'历史记录不存在。'};
+const errors = {unauthorized:'服务令牌无效，请填写 AI_SERVICE_API_KEY。',not_configured:'模型未配置，请前往模型配置页。',model_not_configured:'尚未绑定实体提取模型，请前往模型配置页。',model_database_not_configured:'尚未配置模型数据库连接。',model_config_unavailable:'模型配置库不可用，请检查 MongoDB。',model_config_disabled:'当前绑定的模型已停用，请选择其他模型。',model_config_incompatible:'当前绑定不适用于实体提取，请选择文本 Chat Completions 模型。',model_config_not_found:'当前绑定的模型不存在，请重新配置。',upstream_error:'模型调用失败，请检查服务端模型配置。',invalid_model_output:'模型输出未通过 JSON / 实体校验。',history_unavailable:'MongoDB 读写失败，请检查连接、账号权限和网络。未收到结果时请先查看历史，避免重复提交。',history_configuration_error:'数据库配置无效；数据库应为 lumenx_prism。',history_not_configured:'尚未配置 MongoDB，当前不会保存历史。',history_not_found:'历史记录不存在。'};
 let busy = false, currentResult = null, selectedHistory = null, offset = 0, more = false, historySequence = 0;
 const pageSize = 8;
 function textNode(tag, text, className){const node=document.createElement(tag);node.textContent=text;if(className)node.className=className;return node;}
@@ -56,13 +56,13 @@ async function openHistory(id){
     if(data.error_code)notice(errors[data.error_code]||data.error_code);
     if(data.status==='running')notice('该记录尚未完成，或服务中断导致结果未回写。查看历史不会恢复模型任务。');
     $('historyDetail').hidden=false;$('historyDetail').open=true;
-    $('historyMeta').textContent=JSON.stringify({id:data.id,provider:data.provider,requested_model:data.requested_model,status:data.status,created_at:data.created_at,prompt_sha256:data.prompt_sha256},null,2);
+    $('historyMeta').textContent=JSON.stringify({id:data.id,provider:data.provider,requested_model:data.requested_model,status:data.status,created_at:data.created_at,model_config:data.model_config,actual_model:data.actual_model,usage:data.usage,prompt_sha256:data.prompt_sha256},null,2);
     $('historyText').textContent=data.request.text;$('historyPrompt').textContent=data.request.custom_extraction_prompt||'使用默认提示词';
   }catch(error){notice(error.message);}finally{setBusy(false);}
 }
 async function connect(){
   $('connect').disabled=true;
-  try{const {data}=await api('/v1/test-console/config');$('config').textContent=`${data.provider} / ${data.model} · ${data.model_configured?'凭据已配置':'缺少模型凭据'} · ${data.history_configured?'历史已配置':'未启用历史'}`;status('服务已连接','ok');await loadHistory();}
+  try{const {data}=await api('/v1/test-console/config');$('config').textContent=`${data.provider} / ${data.model} · ${data.model_configured?'凭据已配置':'缺少模型凭据'} · 配置 v${data.model_revision} · ${data.history_configured?'历史已配置':'未启用历史'}`;status('服务已连接','ok');await loadHistory();}
   catch(error){status('连接失败','error');notice(error.message);}finally{$('connect').disabled=false;}
 }
 async function extract(){
