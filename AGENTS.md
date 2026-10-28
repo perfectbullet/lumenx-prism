@@ -6,5 +6,5 @@
 - 使用现有 MongoDB 实例的 lumenx_prism 数据库和 prism_app 账号做数据库级隔离，不创建独立 MongoDB 容器。实体提取可记录实验输入与结果，不写业务项目/资产。
 - 模型运行配置仅从 MongoDB 的 model_comfigs 读取；.env 仅用于数据库连接和服务 token，不得添加模型环境变量回退。语音/图像/视频目前仅支持配置保存，不代表已接入生成。
 - 不提交 .env、凭据、数据、个人工作材料；docs/agents/ 仅本地使用。
-- 使用独立 Conda 环境 lumenx_prism；修改后在该环境中运行 python -m pytest；测试仅使用本机模拟 provider，不默认调用付费模型。
+- 使用独立 Conda 环境 lumenx_prism；修改后在该环境中运行 python -m pytest；自动化回归测试使用模拟 provider；研发联调与效果评测可按需调用已配置的真实付费模型，无需再次单独确认。
 - 独立、原子的 Git 提交；不添加 Co-Authored-By。未指定远端前不推送。
