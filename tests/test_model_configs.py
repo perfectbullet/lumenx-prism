@@ -58,7 +58,9 @@ def test_only_text_chat_can_be_bound(repo):
 
 
 @pytest.mark.parametrize('change',[{'base_url':'ftp://invalid'}, {'parameters':{'model':'override'}},
-                                  {'parameters':{'temperature':3}}, {'parameters':{'unexpected':1}}])
+                                  {'parameters':{'temperature':3}}, {'parameters':{'unexpected':1}},
+                                  {'parameters':{'extra_body':{'model':'override'}}},
+                                  {'parameters':{'extra_body':{'messages':[]}}}])
 def test_invalid_configuration_rejected(change):
     with pytest.raises(ValueError):
         ModelConfigInput(**(PAYLOAD|change))

@@ -51,6 +51,13 @@ class ChatParameters(BaseModel):
     response_format: dict | None = None
     extra_body: dict | None = None
 
+    @model_validator(mode='after')
+    def protect_identity(self):
+        protected = {'model', 'messages', 'stream', 'api_key', 'base_url', 'timeout', 'max_retries'}
+        if protected.intersection(self.extra_body or {}):
+            raise ValueError('extra_body must not override model, input or connection fields')
+        return self
+
 
 class ModelConfigs:
     def __init__(self, database):
