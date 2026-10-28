@@ -14,14 +14,14 @@
 <label for="script">剧本正文 <span id="count">0 / 80000</span></label><textarea id="script" maxlength="80000" placeholder="粘贴中文剧本，保留人物、场景、服装及道具细节…" spellcheck="false"></textarea>
 <details class="advanced"><summary>自定义提取提示词 <span>可选</span></summary><label for="prompt">留空使用默认提示词；填写会替换默认规则。</label><textarea id="prompt" maxlength="30000" placeholder="模板可使用 {text}；不含占位符时自动追加原文。" spellcheck="false"></textarea></details>
 <div class="actions"><button id="extract" class="primary">提取实体</button><span id="runStatus" role="status" aria-live="polite">就绪</span><span id="elapsed"></span></div>
-<p class="hint">点击提取会调用已配置的真实模型，可能产生费用。Ctrl / ⌘ + Enter 提交。输入与提取结果将保存至配置的 MongoDB。</p>
+<p class="hint">点击提取会提交后台任务，由独立 worker 调用已配置的真实模型。刷新页面后连接服务可继续查询。Ctrl / ⌘ + Enter 提交。输入与提取结果将保存至配置的 MongoDB。</p>
 <div class="sample-note" id="sampleNote" hidden>样本检查：角色 3 条（2 个身份，含换装）、场景 2 个、道具 3 个。周叔未出场，手枪被否定；不要补写未知外形。</div>
 </section>
 <section class="card output"><div class="section-head"><h2><span class="step">02</span> <span id="resultTitle">提取结果</span></h2><button id="copy" class="ghost" disabled>复制 JSON</button></div><div id="notice" class="notice" role="alert" hidden></div><div id="runMeta" class="hint"></div>
 <div id="result" class="result"><div class="empty"><span class="empty-mark">◇</span><strong>让故事中的实体浮现</strong><span>提交剧本后，在这里检查描述、换装与幻觉。</span></div></div>
 <details class="raw"><summary>原始 JSON</summary><pre id="raw">尚无结果</pre></details>
 </section></div>
-<section class="card history"><div class="section-head"><h2><span class="step">03</span> 测试历史</h2><div class="actions"><label class="sr-only" for="filter">按状态筛选</label><select id="filter"><option value="">全部状态</option><option value="succeeded">成功</option><option value="failed">失败</option><option value="running">处理中 / 未完成</option></select><button id="refresh" class="ghost">刷新历史</button></div></div>
+<section class="card history"><div class="section-head"><h2><span class="step">03</span> 测试历史</h2><div class="actions"><label class="sr-only" for="filter">按状态筛选</label><select id="historySource" aria-label="历史来源"><option value="jobs">异步任务</option><option value="legacy">旧同步历史</option></select><select id="filter"><option value="">全部状态</option><option value="queued">排队中</option><option value="succeeded">成功</option><option value="failed">失败</option><option value="running">处理中 / 未完成</option></select><button id="refresh" class="ghost">刷新历史</button></div></div>
 <p class="hint">历史来自 MongoDB，不保存在浏览器；点击记录查看结果，再选择是否恢复输入。查看历史不会调用模型。</p>
 <div id="historyStatus" role="status">连接服务后查看历史记录。</div><div id="historyList" class="history-list"></div>
 <div class="pagination"><button id="prev" class="ghost" disabled>上一页</button><span id="pageLabel">第 1 页</span><button id="next" class="ghost" disabled>下一页</button></div>
