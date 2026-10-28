@@ -5,5 +5,5 @@
 - 配置、模型凭据、运行数据和数据库均独立，不读取 ../lumenx/.env，不连接 lumenxdb。
 - 当前实体提取无状态；MongoDB 编排仅预留，接入持久化前明确数据模型及迁移方案。
 - 不提交 .env、凭据、数据、个人工作材料；docs/agents/ 仅本地使用。
-- 修改后使用 .venv/bin/python -m pytest；测试仅使用本机模拟 provider，不默认调用付费模型。
+- 使用独立 Conda 环境 lumenx_prism；修改后在该环境中运行 python -m pytest；测试仅使用本机模拟 provider，不默认调用付费模型。
 - 独立、原子的 Git 提交；不添加 Co-Authored-By。未指定远端前不推送。

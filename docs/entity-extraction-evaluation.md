@@ -32,8 +32,9 @@
 ## 免费验证及已知限度
 
 ```bash
-.venv/bin/python -m pytest
-.venv/bin/python -m pytest tests/test_chinese_sample.py tests/test_output_parsing.py
+conda activate lumenx_prism
+python -m pytest
+python -m pytest tests/test_chinese_sample.py tests/test_output_parsing.py
 ```
 
 中文样本测试把人工参考 JSON 作为模拟模型输出，经真实 FastAPI 路由回放，覆盖原文传递、纯/围栏 JSON、描述与变体字段保留和业务字段边界。它验证处理链路，不验证模型能否从原文正确推理。独立进程 HTTP 测试另外覆盖 Prism 与本机模拟 provider 交互，不接触真实 provider。

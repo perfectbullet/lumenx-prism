@@ -13,10 +13,10 @@
 
 ```bash
 cd /home/zj/aigc/lumenx-prism
-python3 -m venv .venv
-.venv/bin/python -m pip install --index-url https://pypi.tuna.tsinghua.edu.cn/simple -r requirements-dev.txt
+conda activate lumenx_prism
+python -m pip install --index-url https://pypi.tuna.tsinghua.edu.cn/simple -r requirements-dev.txt
 # 从 .env.example 建立自己的 .env，配置自己的模型凭据及服务 token。
-.venv/bin/python -m uvicorn lumenx_prism.api:app --app-dir src --env-file .env --host 127.0.0.1 --port 17178 --reload
+python -m uvicorn lumenx_prism.api:app --app-dir src --env-file .env --host 127.0.0.1 --port 17178 --reload
 ```
 
 调试页 http://127.0.0.1:17178/docs；`GET /health` 返回 service=lumenx-prism，仅表示存活。
@@ -75,7 +75,7 @@ docker compose --env-file .env -f compose.database.yml up -d
 
 打开同级 `../lumenx-prism.code-workspace`，同时显示 `LumenX` 和 `LumenX Prism`；两个文件夹各自保有 Git 仓库和解释器。F5 可分别启动业务后端或 Prism，工作区任务可执行 Prism 测试。
 
-安装 VS Code Python、Python Debugger 扩展。在 Prism 文件中执行 `Python: Select Interpreter`，选择 Prism 的 `.venv/bin/python`。本项目 `.vscode/settings.json` 已配置 pytest 和 `src` 分析路径。
+安装 VS Code Python、Python Debugger 扩展。在 Prism 文件中执行 `Python: Select Interpreter`，选择 Conda 环境 `lumenx_prism` 的 Python。本项目 `.vscode/settings.json` 已配置 pytest 和 `src` 分析路径。
 
 - 启动：终端执行上面的 uvicorn 命令，或运行任务 `Prism: dev server`，仅监听 `127.0.0.1:17178`。
 - 调试：在运行和调试下拉框选择 `Prism: FastAPI (17178)` 再按 F5；先停止占用该端口的开发服务。在 `api.py` 的 `extract_entities`、`extraction.py` 的 `extract` / `parse_entity_output` 设置断点。此配置读取 Prism 自己的 `.env`；不要选择业务后端配置。
@@ -83,9 +83,9 @@ docker compose --env-file .env -f compose.database.yml up -d
 - `/docs` 中配置了服务 token 时须先点 Authorize；提交提取请求会调用已配置的真实 provider，不能用作免费冒烟检查。`/health` 不检查模型可用性。
 
 ```bash
-.venv/bin/python -m pytest
+python -m pytest
 # 只运行中文样本回放与解析回归（无需真实模型）
-.venv/bin/python -m pytest tests/test_chinese_sample.py tests/test_output_parsing.py
+python -m pytest tests/test_chinese_sample.py tests/test_output_parsing.py
 ```
 
 测试覆盖 JSON/实体契约、鉴权、错误脱敏、provider fallback，以及复制应用到临时目录后启动真实 HTTP 服务对接本机模拟模型；不调用付费 API。代码不依赖 ../lumenx，不提交个人工作材料。
