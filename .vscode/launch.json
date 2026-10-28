@@ -1,0 +1,28 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Prism: API (17178)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["lumenx_prism.api:app", "--app-dir", "src", "--host", "127.0.0.1", "--port", "17178"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Prism: Worker",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "lumenx_prism.worker",
+      "args": ["--env-file", "${workspaceFolder}/.env"],
+      "cwd": "${workspaceFolder}",
+      "env": {"PYTHONPATH": "${workspaceFolder}/src"},
+      "console": "integratedTerminal"
+    }
+  ],
+  "compounds": [
+    {"name": "Prism: API + Worker", "configurations": ["Prism: API (17178)", "Prism: Worker"], "stopAll": true}
+  ]
+}

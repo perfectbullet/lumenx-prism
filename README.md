@@ -19,14 +19,24 @@ python -m pip install --index-url https://pypi.tuna.tsinghua.edu.cn/simple -r re
 python -m uvicorn lumenx_prism.api:app --app-dir src --env-file .env --host 127.0.0.1 --port 17178 --reload
 ```
 
+另开一个终端启动独立 worker（API 进程不会自动启动 worker）：
+
+```bash
+cd /home/zj/aigc/lumenx-prism
+conda activate lumenx_prism
+PYTHONPATH=src python -m lumenx_prism.worker --env-file .env
+```
+
+worker 默认每秒查队列，每进程同时执行一个任务。可运行多个 worker，MongoDB 原子领取保证同一任务只被一个有效持有者执行；目前没有 GPU 节点容量调度，接入本地生成前需要补充。Ctrl+C / SIGTERM 停止领取新任务，等待当前推理与结果保存后退出。不要为 worker 开启自动 reload。
+
 实体提取测试台 http://127.0.0.1:17178/tools/entities （根路径 `/` 也可打开）；API 文档 http://127.0.0.1:17178/docs；`GET /health` 返回 service=lumenx-prism，仅表示存活。
-模型配置页为 http://127.0.0.1:17178/tools/models 。模型名称、API key、API 地址及参数全部保存到 MongoDB 的 `model_comfigs` 集合。`.env` 只配置 MongoDB 连接和服务 token；运行时不读取 `OPENAI_*`、`DASHSCOPE_*` 或 `LLM_PROVIDER`，也不会在数据库出错时回退到环境变量。数据库中的模型修改即时生效，不需要重启；修改数据库连接或服务 token 仍需重启进程。
+模型配置页为 http://127.0.0.1:17178/tools/models 。模型名称、API key、API 地址及参数全部保存到 MongoDB 的 `model_comfigs` 集合。`.env` 只配置 MongoDB 连接和服务 token；运行时不读取 `OPENAI_*`、`DASHSCOPE_*` 或 `LLM_PROVIDER`，也不会在数据库出错时回退到环境变量。数据库中的模型修改对新提交即时生效，不需要重启；修改数据库连接或服务 token 仍需重启进程。
 
 ## 模型配置
 
 打开 `/tools/models`，输入 `AI_SERVICE_API_KEY` 并连接配置库。新增模型时填写名称、类型、provider、协议、模型 ID、完整 Base URL、API key、能力标签和调用参数。编辑时 API key 留空保留原值，填写新值则替换；API 响应只返回 `api_key_set`，不回显原 key。保存与切换不会调用模型。
 
-当前实体提取支持 **启用的文本模型 + `openai_chat` 协议**。保存后点击“用于实体提取”完成绑定。接口每次从数据库读取绑定及最新配置，不自动回退到其他模型。`base_url` 直接使用保存值（例如包含 `/v1` 或 `/compatible-mode/v1`），不会自动补路径。
+当前实体提取支持 **启用的文本模型 + `openai_chat` 协议**。保存后点击“用于实体提取”完成绑定。同步接口每次从数据库读取绑定及最新配置；异步任务提交时绑定配置 ID/版本，执行时重新从 MongoDB 读取凭据并检查版本和启用状态，不自动回退到其他模型。`base_url` 直接使用保存值（例如包含 `/v1` 或 `/compatible-mode/v1`），不会自动补路径。
 
 语音、图片与视频类型支持定义保存，供后续各自的运行适配器接入；本次没有实现这些生成能力。
 
@@ -67,6 +77,29 @@ python scripts/import_model_env.py --env-file .env --remove-model-env
 
 迁移使用 Prism 自己的文件，保留已有有效绑定；数据库读回验证成功后才移除旧模型变量。重复执行不创建重复模型，连接和服务 token 保留。新安装请直接使用配置页。
 
+## 异步 AI 任务
+
+测试页面已改用后台任务：提交后立即得到任务编号，查询排队/处理中/成功/失败状态。推理耗时本身不变。接口均沿用服务 Bearer token：
+
+```text
+POST /v1/scripts/extract-entities/jobs   # 同原提取请求体，必须提供 Idempotency-Key 请求头
+GET  /v1/jobs/{id}                      # 输入、状态、阶段、结果或安全错误码
+GET  /v1/jobs?limit=20&offset=0&status=queued
+```
+
+提交返回 `202`、完整任务文档及 `Location: /v1/jobs/{id}`；任务的 `id` 不是业务资产 ID。客户端每次有意新建任务生成一个提交标识（1～128字符）；网络超时重试必须复用该标识和相同输入。相同标识返回原任务，即使任务已结束；不同输入返回409。该标识在整个 Prism 服务内唯一，不是按用户隔离。列表最多100条、offset最多10000，返回摘要，详情才返回完整正文、提示词及结果。所有响应禁用缓存。
+
+新增集合：
+
+- `ai_jobs`：唯一的异步任务状态来源。保存类型、输入、组装提示词及哈希、无密钥模型快照、提交指纹、状态、阶段、领取标识、worker ID、租约、时间、结果、usage 和安全错误码。
+- `ai_job_attempts`：执行尝试审计镜像，由 worker 从任务文档补齐；不是第二套调度状态。当前每个任务最多执行一次推理，不提供自动重试或取消接口。
+
+任务流为 `queued → running → succeeded/failed`。worker 以条件原子更新领取，默认租约60秒、每20秒续期；完成写入还必须匹配领取标识与未过期租约，旧 worker 不能覆盖终态。API 重启不影响任务；worker 未启动时任务留在队列。worker 强制中断后，其他或重启的 worker 会将过期运行任务标记为 `failed / execution_outcome_unknown`，**不会重新提交上游**。同步文本 provider 没有可恢复的任务 ID，此时可能已经发生调用/计费，需人工检查后决定是否以新标识创建任务。恢复检查依赖运行中的 worker；停掉所有 worker 时状态不会自动变化。多机部署需保持时钟同步。
+
+提交时固化提示词和配置 ID/版本，不复制 API key。worker 在执行前读取该模型；配置被禁用、删除或版本变化时失败，版本变化错误码为 `model_config_changed`，不会调用新配置替代。切换用途绑定只影响后续新任务。上游错误和非法输出记为失败，不自动重试；结果写库暂时失败最多重试写入3次，绝不因此重做推理。持续写库失败最终按租约过期处理，无法承诺故障下结果必达或上游 exactly-once。
+
+旧 `POST /v1/scripts/extract-entities` 仍保留同步兼容行为和原响应结构；旧的 `entity_extraction_runs` 历史不迁移。新异步任务仅写 `ai_jobs`，不会重复写旧历史。此次没有修改或切换 LumenX 业务调用。图片、视频、分镜 handler 和多推理节点调度尚未实现。
+
 ## HTTP 接口与接入
 
 `POST /v1/scripts/extract-entities`：
@@ -96,10 +129,11 @@ AI_SERVICE_API_KEY=与Prism匹配的服务token
 
 1. 启动服务后打开 `/tools/entities`，输入 Prism 自己的 `AI_SERVICE_API_KEY`，点击“连接服务”。令牌仅留在页面内存，不写入浏览器存储；服务端模型密钥不返回浏览器。
 2. 先在“模型配置”页面保存并绑定实体提取模型，再粘贴剧本或“载入中文样本”，可展开自定义提示词。只有点击“提取实体”或按 Ctrl/⌘+Enter 才会调用真实模型，可能产生费用。加载页面、样本、配置与历史不会调用模型。
-3. 检查角色/场景/道具卡片与原始 JSON；历史支持状态筛选、分页、详情和恢复输入。恢复输入不会提交。
-4. 历史与提取沿用同一 Bearer token 鉴权。未设置 token 时这些接口均无鉴权，请保持回环监听。页面无外部 CDN 依赖。
+3. 页面自动查询任务直到结束；刷新页面后再次连接服务可继续查询当前任务，也可从历史打开排队/运行任务。当前标签页的 sessionStorage 仅保存任务编号、提交标识和输入哈希，不保存令牌或正文。查询断开不取消任务；提交响应丢失时，相同输入再次提交会复用提交标识。
+4. 检查角色/场景/道具卡片与原始 JSON；历史可切换“异步任务 / 旧同步历史”，支持筛选、分页、详情和恢复输入。恢复输入不会提交。
+5. 历史与提取沿用同一 Bearer token 鉴权。未设置 token 时这些接口均无鉴权，请保持回环监听。页面无外部 CDN 依赖。
 
-## 数据库与实验历史
+## 数据库与旧同步实验历史
 
 按当前部署方案，Prism 使用现有 MongoDB 实例，以独立数据库 `lumenx_prism` 和账号 `prism_app` 做数据库级隔离，不启动单独 MongoDB 容器。连接信息只放 Prism 自己的 `.env`：
 
@@ -131,6 +165,8 @@ GET /v1/test-console/config
 
 打开同级 `../lumenx-prism.code-workspace`，同时显示 `LumenX` 和 `LumenX Prism`；两个文件夹各自保有 Git 仓库和解释器。F5 可分别启动业务后端或 Prism，工作区任务可执行 Prism 测试。
 
+本项目新增 `.vscode/launch.json`：选 `Prism: API + Worker` 可同时调试两个进程，或仅启动 `Prism: Worker` 配合已经运行的 API。请先停止占用17178端口的 API，避免重复启动；在 `worker.py` 的 `run_once` 中设置断点。暂停 worker 超过60秒会使租约失效，这是调试时也保留的保护机制。
+
 安装 VS Code Python、Python Debugger 扩展。在 Prism 文件中执行 `Python: Select Interpreter`，选择 Conda 环境 `lumenx_prism` 的 Python。本项目 `.vscode/settings.json` 已配置 pytest 和 `src` 分析路径。
 
 - 启动：终端执行上面的 uvicorn 命令，或运行任务 `Prism: dev server`，仅监听 `127.0.0.1:17178`。
@@ -151,3 +187,13 @@ python -m pytest tests/test_chinese_sample.py tests/test_output_parsing.py
 ## 环境边界
 
 231 为测试环境，生产为另行管理的 LumenX 服务。Prism 的页面与历史功能在当前仓库内运行，不会自动部署或切换 LumenX 业务调用。业务仓库的 `src/ai_service` 仍有导入依赖，不能直接删除。
+
+### 进程级队列验收
+
+常规 `python -m pytest` 使用模拟数据库及 provider。额外的进程级测试需要可访问 Prism `.env` 指定的 MongoDB：
+
+```bash
+PRISM_MONGO_INTEGRATION=1 python -m pytest tests/test_jobs_process_integration.py
+```
+
+此测试在 `lumenx_prism` 中创建随机 `prism_test_*` 临时集合并在结束后清理，启动独立 API/worker 与本机模拟模型服务。验证 API 重启后排队任务仍可执行、重复提交返回同一任务、强制杀死执行中的 worker 后任务明确失败而不重复推理，以及新 worker 能继续处理后续任务。它不调用真实模型、不改已有模型配置或任务。
