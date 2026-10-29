@@ -31,7 +31,7 @@ class Jobs:
                   'duration_ms','request','effective_prompt','prompt_sha256','model_config','provider',
                   'requested_model','result','error_code','actual_model','usage','text_preview','text_length',
                   'attempt','worker_id','lease_until','negative_prompt','reference_snapshot','workflow_snapshot',
-                  'prompt_version','skill_revision')
+                  'prompt_version','skill_revision','style_snapshot')
         return {'id':row['_id'], **{k:row[k] for k in fields if k in row}}
 
 

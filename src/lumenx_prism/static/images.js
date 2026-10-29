@@ -13,11 +13,13 @@ async function api(path,options={}){
 }
 function payload(){
  const character=$('assetType').value==='character';
+ const rawSeed=$('seed').value;const seed=Number(rawSeed);
+ if(!/^\d+$/.test(rawSeed)||!Number.isSafeInteger(seed)||seed<0||seed>Number.MAX_SAFE_INTEGER)throw Error('种子必须是 0 ～ 9007199254740991 之间的整数。');
  if(character&&$('generationType').value==='three_view'&&!references.length)throw Error('三视图需要参考图：请上传图片，或将已生成的角色图作为身份参考。');
  return {asset_type:$('assetType').value,generation_type:character?$('generationType').value:'image',
  name:$('name').value,description:$('description').value,style:$('style').value,prompt:$('prompt').value,negative_prompt:$('negative').value,
  character_card:character?{name:$('name').value,role:$('role').value,age_range:$('age').value,body_type:$('body').value,hairstyle:$('hair').value,costume:$('costume').value,props:lines('props'),immutable_traits:lines('traits'),expressions:lines('expressions')}:null,
- reference_media_ids:references.map(x=>x.id),width:Number($('width').value),height:Number($('height').value),batch_size:Number($('batch').value),seed:Number($('seed').value),model_config_id:restoredModelConfigId,source_context:sourceContext};
+ reference_media_ids:references.map(x=>x.id),width:Number($('width').value),height:Number($('height').value),batch_size:Number($('batch').value),seed,model_config_id:restoredModelConfigId,source_context:sourceContext};
 }
 function refLabel(){$('references').textContent=references.length?references.map((r,i)=>`${i+1}: ${r.id}`).join(' / '):'无参考图片';}
 async function upload(){
@@ -28,7 +30,7 @@ async function upload(){
  }
  $('files').value='';
 }
-function lock(value){busy=value;$('restoreInput').disabled=value||!currentJob;for(const id of ['generate','preview','files','sample','clearRefs'])$(id).disabled=value;}
+function lock(value){busy=value;$('restoreInput').disabled=value||!currentJob;for(const id of ['generate','preview','files','chooseCharacterSample','chooseSceneSample','choosePropSample','chooseStyle','clearRefs','randomSeed'])$(id).disabled=value;}
 async function show(row){
  currentJob=row.type==='image_generation'?row:null;$('restoreInput').disabled=busy||!currentJob?.request;
  $('jobId').value=row.id;
@@ -40,9 +42,10 @@ async function show(row){
  for(const artifact of row.result?.artifacts||[]){
   const response=await api(`/v1/media/${artifact.id}/download`);const url=URL.createObjectURL(await response.blob());urls.push(url);
   const figure=document.createElement('figure'),img=document.createElement('img'),a=document.createElement('a'),button=document.createElement('button');
-  img.src=url;img.alt='生成候选';a.href=url;a.download=`${artifact.id}.png`;a.textContent='查看 / 下载原图';a.target='_blank';a.rel='noopener';
+  img.src=url;img.alt='生成候选';a.href=url;a.download=`${artifact.id}.png`;a.textContent='下载原图';a.target='_blank';a.rel='noopener';
   button.textContent=row.request?.asset_type==='character'?'作为身份参考':'作为参考图';button.onclick=()=>{references=[artifact];refLabel();$('status').textContent='已选择参考图，可生成派生视图。';};
-  figure.append(img,a,button);
+  const view=document.createElement('button');view.className='result-preview';view.setAttribute('aria-label','查看生成图片原图');view.title='点击查看原图';view.append(img);view.onclick=()=>openImageViewer({url,title:row.request?.name||'生成图片',filename:artifact.id+'.png'});
+  figure.append(view,a,button);
   const next={full_body:['headshot','准备下一步：头像'],headshot:['three_view','准备下一步：三视图'],three_view:['reference_sheet','准备下一步：参考卡']}[row.request?.generation_type];
   if(next&&row.request?.asset_type==='character'){const advance=document.createElement('button');advance.textContent=next[1];advance.onclick=()=>prepareNextStage(row,artifact,next[0]);figure.append(advance);}
   $('results').append(figure);
@@ -77,10 +80,10 @@ async function loadImageHistory(){
 
 $('generate').onclick=async()=>{
  if(busy)return;lock(true);$('status').textContent='上传参考图片并提交任务…';
- try{await upload();const body=JSON.stringify(payload());if(!pending||pending.body!==body)pending={body,key:crypto.randomUUID()};
+ try{await upload();const body=JSON.stringify(payload());if(!pending||pending.body!==body)pending={body,key:PrismRequests.createRequestId()};
  const row=await(await api('/v1/images/generate/jobs',{method:'POST',headers:{'Idempotency-Key':pending.key},body})).json();
  pending=null;$('status').textContent='已提交，刷新后可用任务编号继续查询。';await show(row);await loadImageHistory();
- }catch(e){$('status').textContent=e.message+'；提交超时后原输入重试会复用提交标识。';}finally{lock(false);}
+ }catch(e){$('status').textContent=e.message+(pending?'；如提交未确认，请保持输入不变重试，将复用提交标识。':'');}finally{lock(false);}
 };
 $('preview').onclick=async()=>{lock(true);$('status').textContent='正在预览提示词…';try{await upload();$('raw').textContent=JSON.stringify(await(await api('/v1/images/preview',{method:'POST',body:JSON.stringify(payload())})).json(),null,2);$('snapshot').open=true;$('snapshot').scrollIntoView({block:'nearest',behavior:'smooth'});$('status').textContent='提示词已显示在右侧任务快照中。';}catch(e){$('status').textContent=e.message;}finally{lock(false);}};
 $('connect').onclick=()=>loadImageHistory();$('lookup').onclick=()=>lookup();$('clearRefs').onclick=()=>{references=[];$('files').value='';refLabel();};
@@ -95,7 +98,19 @@ function updateGenerationHint(){
  const [w,h]=recommendedDimensions();$('sizeHint').textContent=`推荐 ${w} × ${h}；尺寸可手动修改。`;
 }
 function useRecommendedSize(){const [w,h]=recommendedDimensions();$('width').value=w;$('height').value=h;autoSize=true;updateGenerationHint();}
-function updateAssetFields(){const character=$('assetType').value==='character';$('generationType').disabled=!character;document.querySelector('.character-details').hidden=!character;for(const field of document.querySelectorAll('.character-field'))field.hidden=!character;updateGenerationHint();}
+function updateDescriptionLabel(){
+ const kind=$('assetType').value;
+ const names={character:'外貌描述',scene:'场景描述',prop:'道具描述',image:'画面描述'};
+ const hints={character:'描述五官、发型、体型和服装',scene:'描述空间、布局、光线和固定地标',prop:'描述外形、材质、颜色和功能',image:'描述希望生成的画面'};
+ $('descriptionLabel').textContent=names[kind];$('description').placeholder=hints[kind];
+ $('polishDescription').setAttribute('aria-label',names[kind]+'润色，待实现');
+}
+$('randomSeed').onclick=()=>{
+ if(busy)return;
+ try{let seed=PrismRequests.randomSeed();if(seed===Number($('seed').value))seed=seed===Number.MAX_SAFE_INTEGER?0:seed+1;$('seed').value=String(seed);pending=null;$('status').textContent='已生成随机种子：'+seed+'。';}
+ catch(e){$('status').textContent=e.message;}
+};
+function updateAssetFields(){updateDescriptionLabel();const character=$('assetType').value==='character';$('generationType').disabled=!character;document.querySelector('.character-details').hidden=!character;for(const field of document.querySelectorAll('.character-field'))field.hidden=!character;updateGenerationHint();}
 $('generationType').onchange=()=>{updateGenerationHint();if(autoSize)useRecommendedSize();};
 $('recommendedSize').onclick=useRecommendedSize;
 for(const id of ['width','height'])$(id).addEventListener('input',()=>{autoSize=false;});
@@ -106,7 +121,7 @@ $('token').addEventListener('input',()=>savedToken(''));
 loadImageHistory();
 
 // Samples are loaded from Prism MongoDB; selecting one never starts generation.
-let sampleCatalog=[],sampleKind='style',sampleSequence=0,currentJob=null,restoredModelConfigId=null,sourceContext={};
+let sampleCatalog=[],sampleKind='character',sampleSequence=0,currentJob=null,restoredModelConfigId=null,sourceContext={};
 const sampleImageUrls=new Map();
 const sampleKindNames={style:'风格',character:'人物',scene:'场景',prop:'道具'};
 function clearInputReferences(){references=[];$('files').value='';refLabel();}
@@ -143,12 +158,11 @@ async function renderSamples(){
   [r.name,r.description,r.category_name,...(r.best_for||[])].join(' ').toLowerCase().includes(search));
  $('sampleGrid').replaceChildren();$('sampleCount').textContent=`${rows.length} 个${sampleKindNames[sampleKind]}样本`;
  $('sampleCategory').hidden=sampleKind!=='style';
- for(const tab of $('sampleTabs').children)tab.setAttribute('aria-pressed',String(tab.dataset.kind===sampleKind));
  if(!rows.length){$('sampleGrid').textContent='暂无匹配样本，请调整筛选条件。';return;}
  for(const sample of rows){
   const card=document.createElement('article');card.className='sample-card';
   const image=sample.preview_media_id?document.createElement('img'):null;
-  if(image){image.alt=sample.name+'风格参考图';image.loading='lazy';image.style.objectPosition=sample.object_position||'center';card.append(image);
+  if(image){image.alt=sample.name+'风格参考图';image.loading='lazy';image.style.objectPosition=sample.object_position||'center';const view=document.createElement('button');view.className='sample-image-button';view.setAttribute('aria-label','查看'+sample.name+'原图');view.title='点击查看原图';view.append(image);view.onclick=()=>openImageViewer({mediaId:sample.original_media_id||sample.preview_media_id,title:sample.name});card.append(view);
    (async()=>{try{let url=sampleImageUrls.get(sample.preview_media_id);if(!url){url=URL.createObjectURL(await(await api(`/v1/media/${sample.preview_media_id}/download`)).blob());sampleImageUrls.set(sample.preview_media_id,url);}if(sequence===sampleSequence)image.src=url;}catch{image.alt=sample.name+'（配图加载失败）';}})();
   }
   const title=document.createElement('h3');title.textContent=sample.name;
@@ -159,9 +173,17 @@ async function renderSamples(){
   card.append(title,categoryText,description,note,button);$('sampleGrid').append(card);
  }
 }
-async function openSamples(){
+async function openSamples(mode='character'){
  if(busy)return;
- $('samplesDialog').showModal();$('sampleCount').textContent='正在读取样本库…';
+ const styleMode=mode==='style';
+ sampleKind=mode;
+ $('sampleCategory').hidden=!styleMode;
+ $('sampleSearch').value='';$('sampleCategory').value='';
+ $('sampleDialogTitle').textContent={style:'选择视觉风格',character:'人物样本选择',scene:'场景样本选择',prop:'道具样本选择'}[mode];
+ $('sampleDialogDescription').textContent=styleMode?'点击配图查看原图；应用风格后可继续编辑提示词。':`选择${sampleKindNames[mode]}样本，保留当前风格；载入后可继续编辑。`;
+ $('sampleSearch').placeholder=styleMode?'搜索风格、描述或题材':'搜索人物、场景或道具';
+ $('sampleFooter').textContent=styleMode?'风格来自 Prism 数据库 · 应用风格提示词和负面词 · 保留主体输入':'样本来自 Prism 数据库 · 保留当前风格，可自由编辑主体';
+ $('sampleGrid').replaceChildren();$('samplesDialog').showModal();$('sampleCount').textContent='正在读取样本库…';
  try{
   const data=await(await api('/v1/image-samples?limit=100')).json();sampleCatalog=data.items;
   const selected=$('sampleCategory').value;$('sampleCategory').replaceChildren(new Option('全部风格分类',''));
@@ -170,9 +192,8 @@ async function openSamples(){
   $('sampleCategory').value=selected;await renderSamples();
  }catch(e){$('sampleCount').textContent='样本加载失败：'+e.message;}
 }
-$('sample').onclick=openSamples;$('closeSamples').onclick=()=>$('samplesDialog').close();
+$('chooseCharacterSample').onclick=()=>openSamples('character');$('chooseSceneSample').onclick=()=>openSamples('scene');$('choosePropSample').onclick=()=>openSamples('prop');$('chooseStyle').onclick=()=>openSamples('style');$('closeSamples').onclick=()=>$('samplesDialog').close();
 $('sampleSearch').oninput=renderSamples;$('sampleCategory').onchange=renderSamples;
-for(const tab of $('sampleTabs').children)tab.onclick=()=>{sampleKind=tab.dataset.kind;$('sampleCategory').value='';renderSamples();};
 function restoreRequest(request){
  applySubject(request);
  for(const id of ['style','prompt'])$(id).value=request[id]||'';
@@ -203,3 +224,44 @@ function prepareNextStage(row,artifact,target){
 }
 updateAssetFields();
 window.addEventListener('beforeunload',()=>{for(const url of sampleImageUrls.values())URL.revokeObjectURL(url);});
+
+let viewerSequence=0,viewerOwnedUrl=null;
+function resetViewer(){
+ viewerSequence++;
+ $('viewerImage').removeAttribute('src');$('viewerImage').onload=null;
+ if(viewerOwnedUrl){URL.revokeObjectURL(viewerOwnedUrl);viewerOwnedUrl=null;}
+}
+async function openImageViewer({url,mediaId,title='原图',filename='image.png'}){
+ resetViewer();const sequence=viewerSequence;
+ $('viewerTitle').textContent=title;$('viewerStatus').textContent='正在加载原图…';
+ $('viewerStage').classList.remove('original-size');$('viewerZoom').textContent='100% 原始尺寸';$('viewerZoom').disabled=true;$('viewerDownload').hidden=true;
+ $('viewerImage').alt=title;
+ if(!$('imageViewer').open)$('imageViewer').showModal();
+ try{
+  if(mediaId){
+   const blob=await(await api(`/v1/media/${mediaId}/download`)).blob();
+   if(sequence!==viewerSequence)return;
+   url=URL.createObjectURL(blob);viewerOwnedUrl=url;
+   const ext={'image/png':'png','image/jpeg':'jpg','image/webp':'webp'}[blob.type]||'png';
+   filename=title+'.'+ext;
+  }
+  if(sequence!==viewerSequence)return;
+  $('viewerImage').onload=()=>{
+   if(sequence!==viewerSequence)return;
+   $('viewerStatus').textContent=`${$('viewerImage').naturalWidth} × ${$('viewerImage').naturalHeight} · 可切换原始尺寸查看细节`;
+   $('viewerZoom').disabled=false;
+  };
+  $('viewerImage').onerror=()=>{if(sequence===viewerSequence)$('viewerStatus').textContent='图片解码失败，请重新打开。';};
+  $('viewerImage').src=url;$('viewerDownload').href=url;$('viewerDownload').download=filename;$('viewerDownload').hidden=false;
+ }catch(e){if(sequence===viewerSequence)$('viewerStatus').textContent='原图加载失败：'+e.message;}
+}
+$('closeViewer').onclick=()=>$('imageViewer').close();
+$('imageViewer').addEventListener('close',resetViewer);
+$('imageViewer').addEventListener('click',event=>{
+ const bounds=$('imageViewer').getBoundingClientRect();
+ if(event.target===$('imageViewer')&&(event.clientX<bounds.left||event.clientX>bounds.right||event.clientY<bounds.top||event.clientY>bounds.bottom))$('imageViewer').close();
+});
+$('viewerZoom').onclick=()=>{
+ const original=$('viewerStage').classList.toggle('original-size');
+ $('viewerZoom').textContent=original?'适应窗口':'100% 原始尺寸';$('viewerStage').scrollTop=0;$('viewerStage').scrollLeft=0;
+};

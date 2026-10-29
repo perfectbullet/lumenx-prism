@@ -4,8 +4,9 @@ Source revision: 199b7d0e1fd95e7b3eafa8c15eca692534142427. No Hub dependency.
 import json
 import re
 from .image_schemas import ImageRequest
+from .style_rules import adapt_visual_style
 
-PROMPT_VERSION = 'character-production-v3'
+PROMPT_VERSION = 'asset-production-v5'
 SKILL_REVISION = '199b7d0e1fd95e7b3eafa8c15eca692534142427'
 
 
@@ -85,8 +86,25 @@ def compile_image_prompt(request: ImageRequest):
                   'fixed continuity landmarks and important environmental props. '
                   'No characters, people, crowds, silhouettes, faces, hands or character cameos.']
     elif r.asset_type == 'prop':
-        parts += ['Isolated prop production reference: readable silhouette, consistent materials and colors, '
-                  'neutral background, no person or hands.']
+        single_instruction = (
+            '道具静物资产图。画面唯一主体是下方指定的一件物品，独立置于空白展示台上。'
+            '完整外轮廓居中，纯色摄影棚背景，画面内容仅由物品本体、展示台与接触阴影构成。'
+            '所有表面采用连续均匀的纯色材质，严格保留指定的颜色、材质、结构和功能。'
+            '表面仅有材质本身的纹理和高光，装饰保持素净，优先展示工业造型与结构细节。'
+            'Product still-life of exactly ONE standalone object. '
+            'The composition consists solely of object geometry, plain studio surface and contact shadow. '
+            'Every visible surface uses uniform solid-color, unprinted materials, with natural material '
+            'texture and highlights. Clean undecorated product design, complete outline, centered composition. '
+            'Preserve the specified materials, colors and functional details.'
+        )
+        if re.search(r'手机|电脑|显示器|屏幕|平板|电视|phone|laptop|monitor|screen|tablet|television',
+                     r.name + ' ' + r.description, re.I):
+            parts += ['If a display is visible, its entire content consists of a solid light-gray background, '
+                      'three monochrome rounded-rectangle message bubbles and short horizontal placeholder lines. '
+                      'Use only these simple geometric shapes in a minimal abstract interface. '
+                      '屏幕界面全部由浅灰纯色底、三条单色圆角矩形消息条和短横线占位符组成。']
+        negative += ', people, person, character, face, portrait, avatar, hands, arms, human skin, person holding object'
+
     if r.reference_media_ids:
         if r.asset_type == 'character':
             reference_rule = 'Preserve the character identity and costume from image 1; use additional images as supplied visual references.'
@@ -94,7 +112,7 @@ def compile_image_prompt(request: ImageRequest):
             reference_rule = 'Preserve the described environment or object from the supplied visual references.'
         parts += ['The attached reference images are ordered: ' + ', '.join(
             f'image {i+1}' for i in range(len(r.reference_media_ids))) + '. ' + reference_rule]
-    style = r.style or 'Stylized 3D animated feature design, readable shapes, tactile materials, soft lighting.'
+    style = adapt_visual_style(r.style, r.asset_type)['effective']
     parts += ['Visual style: ' + style]
     if single_instruction:
         parts = [single_instruction] + parts + [single_instruction]
@@ -103,5 +121,7 @@ def compile_image_prompt(request: ImageRequest):
                              if part.strip().lower() not in ('text', 'no text', '文字', '无文字', 'labels', 'no labels'))
     if r.asset_type == 'scene':
         negative += ', people, crowds, silhouettes, faces, hands, character cameos'
-    negative += ', watermark, malformed anatomy'
+    negative += ', watermark'
+    if r.asset_type in ('character', 'image'):
+        negative += ', malformed anatomy'
     return '\n\n'.join(p for p in parts if p), negative.strip(', ')

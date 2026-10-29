@@ -4,23 +4,24 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>图像制作台 · LumenX Prism</title>
 <link rel="stylesheet" href="/static/entities.css">
-<link rel="stylesheet" href="/static/images.css?v=20261029-character3">
-<script src="/static/images.js?v=20261029-character3" defer></script>
+<link rel="stylesheet" href="/static/images.css?v=20261029-seed1">
+<script src="/static/request-utils.js?v=20261029-seed1" defer></script>
+<script src="/static/images.js?v=20261029-seed1" defer></script>
 </head>
 <body><main>
 <header><div><div class="eyebrow">LUMENX PRISM / IMAGE LAB</div><h1>图像制作台</h1></div><nav><a href="/tools/entities">实体提取</a><a href="/tools/models">模型配置</a></nav></header>
 <div class="workspace image-workspace">
 <section class="card editor-panel" aria-labelledby="editorTitle">
- <div class="section-head panel-heading"><h2 id="editorTitle"><span class="step">01</span>制作要求</h2><button id="sample" class="ghost">选择测试样本</button></div>
+ <div class="section-head panel-heading"><div class="editor-heading-main"><h2 id="editorTitle"><span class="step">01</span>制作要求</h2><button id="chooseStyle" class="ghost">选择风格</button><button id="chooseCharacterSample" class="ghost">人物样本选择</button><button id="chooseSceneSample" class="ghost">场景样本选择</button><button id="choosePropSample" class="ghost">道具样本选择</button></div></div>
  <div class="panel-scroll editor-fields">
-  <div class="sample-selection"><div><span id="selectedStyle" class="tag">风格：自定义</span><span id="selectedSubject" class="tag">样本：自定义</span></div><p id="sampleNote" class="hint">点击“选择测试样本”，分别搭配风格与人物、场景或道具。</p></div>
+  <div class="sample-selection"><div><span id="selectedStyle" class="tag">风格：自定义</span><span id="selectedSubject" class="tag">样本：自定义</span></div><p id="sampleNote" class="hint">通过标题栏分别选择风格与人物、场景或道具样本。</p></div>
   <div class="fields">
    <label>资产类型<select id="assetType"><option value="character">角色</option><option value="scene">场景</option><option value="prop">道具</option><option value="image">自由图片</option></select></label>
    <label>输出类型<select id="generationType"><option value="full_body">主体全身图（可选参考）</option><option value="headshot">头像（可选参考）</option><option value="three_view">三视图（需参考图）</option><option value="reference_sheet">完整角色参考卡（建议参考）</option></select></label>
    <div class="wide character-field generation-guide"><strong>推荐：全身定妆 → 头像细化 → 三视图 → 完整参考卡</strong><p id="generationHelp" class="hint"></p></div>
    <label>名称<input id="name" maxlength="100" value="林夏"></label><label>角色作用<input id="role" value="主角"></label>
-   <label class="wide">外形 / 场景 / 道具描述<textarea id="description" maxlength="6000" rows="2" placeholder="描述主体外观、环境或道具特征"></textarea></label>
-   <label class="wide">画风<textarea id="style" maxlength="4000" rows="2" placeholder="例如：二维赛璐璐；留空采用柔和三维动画风格"></textarea></label>
+   <div class="wide description-field"><div class="description-heading"><label id="descriptionLabel" for="description">外貌描述</label><button id="polishDescription" class="ghost" type="button" disabled title="润色功能待实现，暂不调用模型">润色（待实现）</button></div><textarea id="description" maxlength="6000" rows="2" placeholder="描述五官、发型、体型和服装"></textarea></div>
+   <label class="wide">画风<textarea id="style" maxlength="4000" rows="2" placeholder="例如：二维赛璐璐；留空采用柔和三维动画风格"></textarea><span class="hint">按资产类型适配风格，预览可查看实际词条与移除项。</span></label>
    <label class="wide character-field">不可改变的身份特征 · 每行一项<textarea id="traits" rows="2" placeholder="角色必填，例如发型、瞳色、标志性服装"></textarea></label>
   </div>
   <details class="advanced character-details"><summary>角色细节 <span>年龄、体型、服装、表情与道具</span></summary>
@@ -30,7 +31,7 @@ sad
 angry</textarea></label></div>
   </details>
   <div class="reference-box"><div class="section-head"><label for="files">参考图片 <span class="hint">最多 4 张，角色首张为身份主参考</span></label><button id="clearRefs" class="ghost">清空</button></div><input id="files" type="file" multiple accept="image/png,image/jpeg,image/webp"><div id="references" class="hint">无参考图片</div></div>
-  <details class="advanced"><summary>生成设置 <span>尺寸、候选数量与种子</span></summary><div class="size-recommendation"><span id="sizeHint" class="hint"></span><button id="recommendedSize" class="ghost">采用推荐尺寸</button></div><div class="fields settings-fields"><label>宽度<input id="width" type="number" value="768" step="32" min="256" max="2048"></label><label>高度<input id="height" type="number" value="1344" step="32" min="256" max="2048"></label><label>候选数量<select id="batch"><option>1</option><option>2</option><option>3</option><option>4</option></select></label><label>种子<input id="seed" type="number" value="20261029" min="0"></label></div></details>
+  <details class="advanced"><summary>生成设置 <span>尺寸、候选数量与种子</span></summary><div class="size-recommendation"><span id="sizeHint" class="hint"></span><button id="recommendedSize" class="ghost">采用推荐尺寸</button></div><div class="fields settings-fields"><label>宽度<input id="width" type="number" value="768" step="32" min="256" max="2048"></label><label>高度<input id="height" type="number" value="1344" step="32" min="256" max="2048"></label><label>候选数量<select id="batch"><option>1</option><option>2</option><option>3</option><option>4</option></select></label><div class="seed-field"><label for="seed">种子</label><div class="seed-control"><input id="seed" type="number" value="20261029" min="0" max="9007199254740991" step="1" inputmode="numeric" aria-describedby="seedRange"><button id="randomSeed" class="ghost" type="button">随机</button></div><p id="seedRange" class="hint">范围：0 ～ 9007199254740991（整数）</p></div></div></details>
   <details class="advanced"><summary>补充提示词 <span>创作要求与负面词</span></summary><label>创作要求<textarea id="prompt" rows="2"></textarea></label><label>负面提示词<textarea id="negative" rows="2"></textarea></label></details>
  </div>
  <div class="editor-footer"><div class="actions"><button id="preview">预览提示词</button><button id="generate" class="primary">提交生成</button></div><p id="status" role="status" aria-live="polite">就绪</p></div>
@@ -44,9 +45,14 @@ angry</textarea></label></div>
 </section>
 </div></main>
 <dialog id="samplesDialog" class="sample-dialog" aria-labelledby="sampleDialogTitle">
- <div class="dialog-heading"><div><h2 id="sampleDialogTitle">测试样本库</h2><p class="hint">从风格配图选画风，再选择人物、场景或道具。载入后可自由编辑。</p></div><button id="closeSamples" class="ghost" aria-label="关闭样本库">关闭</button></div>
- <div class="sample-filters"><div id="sampleTabs" class="sample-tabs" role="group" aria-label="样本类型"><button data-kind="style" aria-pressed="true">风格</button><button data-kind="character" aria-pressed="false">人物</button><button data-kind="scene" aria-pressed="false">场景</button><button data-kind="prop" aria-pressed="false">道具</button></div><label for="sampleSearch" class="sr-only">搜索样本</label><input id="sampleSearch" type="search" placeholder="搜索名称、描述或题材"><label for="sampleCategory" class="sr-only">风格分类</label><select id="sampleCategory"><option value="">全部风格分类</option></select></div>
+ <div class="dialog-heading"><div><h2 id="sampleDialogTitle">主体样本库</h2><p id="sampleDialogDescription" class="hint">选择人物、场景或道具，载入后可自由编辑。</p></div><button id="closeSamples" class="ghost" aria-label="关闭样本库">关闭</button></div>
+ <div class="sample-filters"><label for="sampleSearch" class="sr-only">搜索样本</label><input id="sampleSearch" type="search" placeholder="搜索名称、描述或题材"><label for="sampleCategory" class="sr-only">风格分类</label><select id="sampleCategory"><option value="">全部风格分类</option></select></div>
  <p id="sampleCount" class="sample-count" role="status"></p><div id="sampleGrid" class="sample-grid"></div>
- <footer>样本来自 Prism 数据库 · 风格与主体可独立选择 · 配图用于浏览，生成应用风格提示词</footer>
+ <footer id="sampleFooter">样本来自 Prism 数据库 · 保留当前风格，可自由编辑主体</footer>
+</dialog>
+<dialog id="imageViewer" class="image-viewer" aria-labelledby="viewerTitle">
+ <div class="viewer-toolbar"><h2 id="viewerTitle">原图</h2><div class="viewer-actions"><button id="viewerZoom" class="ghost" disabled>100% 原始尺寸</button><a id="viewerDownload" class="viewer-download" download hidden>下载原图</a><button id="closeViewer" class="ghost" aria-label="关闭原图">关闭</button></div></div>
+ <div id="viewerStage" class="viewer-stage" tabindex="0" aria-label="原图预览，原始尺寸下可滚动查看"><img id="viewerImage" alt="原图"></div>
+ <p id="viewerStatus" role="status">正在加载原图…</p>
 </dialog>
 </body></html>

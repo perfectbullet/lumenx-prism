@@ -9,6 +9,7 @@ from uuid import uuid4
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 from .jobs import Jobs, utcnow
+from .style_rules import adapt_visual_style
 from .model_configs import ConfigError, ModelConfigs
 from .image_schemas import ImageParameters
 from .image_prompts import compile_image_prompt, PROMPT_VERSION, SKILL_REVISION
@@ -38,6 +39,7 @@ class ImageJobs(Jobs):
                  request=request.model_dump(mode='json'),request_hash=self.fingerprint(request),idempotency_key=key,
                  effective_prompt=prompt,negative_prompt=negative,prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest(),
                  prompt_version=PROMPT_VERSION,skill_revision=SKILL_REVISION,reference_snapshot=refs,
+                 style_snapshot=adapt_visual_style(request.style, request.asset_type),
                  workflow_snapshot=workflow_snapshot(),model_config=ModelConfigs.snapshot(config),
                  provider=config['provider'],requested_model=config['model'],result=None,error_code=None,
                  executions=[],attempt=0,worker_id=None,lease_until=None)

@@ -323,9 +323,11 @@ def submit_image_job(payload: ImageRequest,response: Response,request: Request,
 @app.post('/v1/images/preview',dependencies=[Depends(require_service_auth)])
 def preview_image(payload: ImageRequest,response: Response):
     from .image_prompts import compile_image_prompt,PROMPT_VERSION
+    from .style_rules import adapt_visual_style
     prompt,negative=compile_image_prompt(payload)
     response.headers['Cache-Control']='no-store'
-    return {'prompt':prompt,'negative_prompt':negative,'prompt_version':PROMPT_VERSION}
+    return {'prompt':prompt,'negative_prompt':negative,'prompt_version':PROMPT_VERSION,
+            'style_snapshot':adapt_visual_style(payload.style, payload.asset_type)}
 
 
 @app.post('/v1/media',status_code=201,dependencies=[Depends(require_service_auth)])

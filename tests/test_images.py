@@ -234,10 +234,32 @@ def test_worker_uses_frozen_prompt_after_compiler_changes(setup, monkeypatch):
     jobs, configs, media, request, adapter = setup
     request = ImageRequest(**(request.model_dump() | {'generation_type': 'headshot'}))
     row = jobs.submit_image(request, 'frozen-prompt', configs.resolve_image_model(), media)
-    assert row['prompt_version'] == 'character-production-v3'
+    assert row['prompt_version'] == 'asset-production-v5'
     monkeypatch.setattr('lumenx_prism.image_jobs.compile_image_prompt', lambda _: ('different prompt', 'different negative'))
     ImageWorker(jobs, configs, media, 'worker', adapter_factory=lambda _: adapter).run_once()
     assert jobs.get(row['id'])['status'] == 'succeeded'
     graph = adapter.submit.call_args.args[0]
     assert graph['37']['inputs']['prompt'] == row['effective_prompt']
     assert graph['37']['inputs']['negative_prompt'] == row['negative_prompt']
+
+
+def test_image_job_freezes_original_and_effective_asset_style(setup):
+    jobs, configs, media, _, adapter = setup
+    request = ImageRequest(asset_type='prop', name='手机', description='消息屏幕',
+                           style='3D render, expressive character design, warm lighting')
+    row = jobs.submit_image(request, 'typed-style', configs.resolve_image_model(), media)
+    assert row['style_snapshot']['original'] == request.style
+    assert row['style_snapshot']['effective'] == '3D render, warm lighting'
+    assert row['request']['style'] == request.style
+    assert 'expressive character design' not in row['effective_prompt']
+
+
+@pytest.mark.parametrize('seed', [0, 2**53-1])
+def test_image_seed_accepts_safe_integer_boundaries(seed):
+    assert ImageRequest(asset_type='prop', description='杯子', seed=seed).seed == seed
+
+
+@pytest.mark.parametrize('seed', [-1, 2**53, .5])
+def test_image_seed_rejects_out_of_range_or_fractional_values(seed):
+    with pytest.raises(ValidationError):
+        ImageRequest(asset_type='prop', description='杯子', seed=seed)

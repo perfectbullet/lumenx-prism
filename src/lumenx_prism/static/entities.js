@@ -97,9 +97,9 @@ async function extract(){
   setBusy(true);notice('');status('正在提交任务…','busy');$('resultTitle').textContent='本次结果';renderResult(null);
   try{
     const body=JSON.stringify({text,custom_extraction_prompt:custom});
-    const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(body)))).map(x=>x.toString(16).padStart(2,'0')).join('');
+    const digest=await PrismRequests.fingerprint(body);
     let pending;try{pending=JSON.parse(store.get('prism.pendingSubmission'));}catch{}
-    if(!pending || pending.digest!==digest){pending={digest,key:crypto.randomUUID()};store.set('prism.pendingSubmission',JSON.stringify(pending));}
+    if(!pending || pending.digest!==digest){pending={digest,key:PrismRequests.createRequestId()};store.set('prism.pendingSubmission',JSON.stringify(pending));}
     const {data}=await api(`${endpoint}/jobs`,{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':pending.key},body});
     store.set('prism.activeJob',data.id);store.remove('prism.pendingSubmission');
     $('historySource').value='jobs';offset=0;await loadHistory();await watchJob(data.id);
