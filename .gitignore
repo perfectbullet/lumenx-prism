@@ -12,3 +12,4 @@ data/
 logs/
 docs/agents/
 *.code-workspace
+.vscode/settings.json
