@@ -107,3 +107,16 @@ def test_service_auth_precedes_model_call(client, monkeypatch):
     assert client.post('/v1/scripts/extract-entities', json={'text': '原文'},
                        headers={'Authorization': 'Bearer test-token'}).status_code == 200
     assert client.get('/health').status_code == 200
+
+
+def test_service_auth_can_be_temporarily_disabled(client, monkeypatch):
+    monkeypatch.setenv('AI_SERVICE_API_KEY', 'configured-service-token')
+    monkeypatch.setenv('PRISM_SERVICE_AUTH_ENABLED', 'false')
+    assert client.post('/v1/scripts/extract-entities', json={'text': '原文'}).status_code == 200
+    for path in ('/tools/entities', '/tools/models', '/tools/images'):
+        page = client.get(path)
+        assert page.status_code == 200
+        assert 'display:none!important' in page.text
+    monkeypatch.setenv('PRISM_SERVICE_AUTH_ENABLED', 'true')
+    assert client.post('/v1/scripts/extract-entities', json={'text': '原文'}).status_code == 401
+    assert 'display:none!important' not in client.get('/tools/images').text

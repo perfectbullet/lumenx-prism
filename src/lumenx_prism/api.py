@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import Depends, FastAPI, HTTPException, Response, Query, Request, Header
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -37,10 +37,26 @@ static = Path(__file__).parent / 'static'
 app.mount('/static', StaticFiles(directory=static), name='static')
 
 
+def service_auth_enabled():
+    return os.getenv('PRISM_SERVICE_AUTH_ENABLED', 'true').strip().lower() not in ('false', '0', 'off', 'no')
+
+
+def console_page(filename):
+    if service_auth_enabled():
+        return FileResponse(static / filename, headers={'Cache-Control': 'no-store'})
+    html = (static / filename).read_text(encoding='utf-8')
+    # Keep the inputs in the DOM for existing console scripts, but hide the token controls.
+    html = html.replace('</head>', '<style>label:has(#token),div:has(>label[for="token"]){display:none!important}</style>'
+                        '<script>try{sessionStorage.removeItem("prism.images.serviceToken")}catch{}</script></head>')
+    html = html.replace('令牌仅保留在当前页面内存中。', '当前开发环境已关闭接口鉴权。')
+    html = html.replace('服务 token 沿用 Prism 鉴权', '当前开发环境已关闭接口鉴权')
+    return HTMLResponse(html, headers={'Cache-Control': 'no-store'})
+
+
 @app.get('/', include_in_schema=False)
 @app.get('/tools/entities', include_in_schema=False)
 def test_page():
-    return FileResponse(static / 'entities.html', headers={'Cache-Control': 'no-store'})
+    return console_page('entities.html')
 
 
 def get_history():
@@ -67,6 +83,8 @@ def history_operation(operation):
 
 
 def require_service_auth(credentials: HTTPAuthorizationCredentials | None = Depends(bearer)):
+    if not service_auth_enabled():
+        return
     expected = os.getenv('AI_SERVICE_API_KEY', '')
     if expected and (credentials is None or not secrets.compare_digest(
             credentials.credentials.encode('utf-8'), expected.encode('utf-8'))):
@@ -100,7 +118,7 @@ def get_extractor(configs=Depends(get_model_configs)):
 
 @app.get('/tools/models', include_in_schema=False)
 def model_page():
-    return FileResponse(static / 'models.html', headers={'Cache-Control': 'no-store'})
+    return console_page('models.html')
 
 
 @app.get('/v1/model-configs', dependencies=[Depends(require_service_auth)])
@@ -244,12 +262,113 @@ def submit_entity_job(payload: EntityExtractionRequest, response: Response,
 def list_jobs(response: Response, limit: int = Query(20, ge=1, le=100),
               offset: int = Query(0, ge=0, le=10000),
               status: Literal['queued', 'running', 'succeeded', 'failed'] | None = None,
+              job_type: Literal['entity_extraction', 'image_generation'] | None = Query(None, alias='type'),
               jobs=Depends(get_jobs)):
     response.headers['Cache-Control'] = 'no-store'
-    return job_operation(lambda: jobs.list(limit, offset, status))
+    return job_operation(lambda: jobs.list(limit, offset, status, job_type))
 
 
 @app.get('/v1/jobs/{job_id}', dependencies=[Depends(require_service_auth)])
-def job_detail(job_id: UUID, response: Response, jobs=Depends(get_jobs)):
+def job_detail(job_id: UUID, response: Response, request: Request, jobs=Depends(get_jobs)):
     response.headers['Cache-Control'] = 'no-store'
-    return job_operation(lambda: jobs.get(str(job_id)))
+    return media_urls(job_operation(lambda: jobs.get(str(job_id))), request)
+
+
+# Image generation and Prism-owned input/output media.
+from fastapi import UploadFile, File
+from .image_schemas import ImageRequest
+from .image_jobs import ImageJobs
+from .media import MediaStore, MAX_BYTES
+
+
+def get_media(jobs=Depends(get_jobs)):
+    return MediaStore(jobs.collection.database)
+
+
+def media_urls(row, request):
+    # Absolute public origin is optional; relative links work for the same-origin console.
+    import copy
+    row=copy.deepcopy(row)
+    base=os.getenv('PRISM_PUBLIC_BASE_URL','').rstrip('/')
+    for artifact in (row.get('result') or {}).get('artifacts',[]):
+        artifact['download_url']=base+'/v1/media/'+artifact['id']+'/download'
+    return row
+
+
+@app.get('/tools/images',include_in_schema=False)
+def image_page():
+    return console_page('images.html')
+
+
+@app.put('/v1/model-configs/{config_id}/image-generation',dependencies=[Depends(require_service_auth)])
+def bind_image_model(config_id: UUID,response: Response,configs=Depends(get_model_configs)):
+    response.headers['Cache-Control']='no-store'
+    return config_operation(lambda:configs.bind_image_model(str(config_id)))
+
+
+@app.post('/v1/images/generate/jobs',status_code=202,dependencies=[Depends(require_service_auth)])
+def submit_image_job(payload: ImageRequest,response: Response,request: Request,
+                     idempotency_key: str=Header(min_length=1,max_length=128),
+                     jobs=Depends(get_jobs),configs=Depends(get_model_configs),media=Depends(get_media)):
+    images=ImageJobs(jobs.collection.database)
+    row=job_operation(lambda:images.existing(idempotency_key,payload))
+    if row is None:
+        config=config_operation(lambda:configs.resolve_image_model(payload.model_config_id))
+        row=job_operation(lambda:images.submit_image(payload,idempotency_key,config,media))
+    response.headers['Cache-Control']='no-store'
+    response.headers['Location']='/v1/jobs/'+row['id']
+    return media_urls(row,request)
+
+
+@app.post('/v1/images/preview',dependencies=[Depends(require_service_auth)])
+def preview_image(payload: ImageRequest,response: Response):
+    from .image_prompts import compile_image_prompt,PROMPT_VERSION
+    prompt,negative=compile_image_prompt(payload)
+    response.headers['Cache-Control']='no-store'
+    return {'prompt':prompt,'negative_prompt':negative,'prompt_version':PROMPT_VERSION}
+
+
+@app.post('/v1/media',status_code=201,dependencies=[Depends(require_service_auth)])
+def upload_image(response: Response,file: UploadFile=File(...),media=Depends(get_media)):
+    content=file.file.read(MAX_BYTES+1)
+    row=config_operation(lambda:media.put(content))
+    response.headers['Cache-Control']='no-store'
+    return row | {'download_url':os.getenv('PRISM_PUBLIC_BASE_URL','').rstrip('/')+'/v1/media/'+row['id']+'/download'}
+
+
+@app.get('/v1/media/{media_id}/download',dependencies=[Depends(require_service_auth)])
+def download_image(media_id: UUID,media=Depends(get_media)):
+    row,path=config_operation(lambda:media.get(str(media_id)))
+    return FileResponse(path,media_type=row['mime_type'],headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+
+
+# Read-only test fixtures; imports are explicit and never mutate business assets.
+from .image_samples import ImageSamples
+
+
+def get_image_samples(jobs=Depends(get_jobs)):
+    return ImageSamples(jobs.collection.database)
+
+
+def sample_operation(operation):
+    try:
+        return operation()
+    except ConfigError as exc:
+        raise HTTPException(exc.status, detail={'code': exc.code}) from None
+    except Exception:
+        raise HTTPException(503, detail={'code': 'image_sample_store_unavailable'}) from None
+
+
+@app.get('/v1/image-samples', dependencies=[Depends(require_service_auth)])
+def list_image_samples(response: Response,
+                       kind: Literal['style', 'character', 'scene', 'prop'] | None = None,
+                       limit: int = Query(100, ge=1, le=100),
+                       offset: int = Query(0, ge=0, le=10000), samples=Depends(get_image_samples)):
+    response.headers['Cache-Control'] = 'no-store'
+    return sample_operation(lambda: samples.list(kind, limit, offset))
+
+
+@app.get('/v1/image-samples/{sample_id}', dependencies=[Depends(require_service_auth)])
+def image_sample_detail(sample_id: UUID, response: Response, samples=Depends(get_image_samples)):
+    response.headers['Cache-Control'] = 'no-store'
+    return sample_operation(lambda: samples.get(str(sample_id)))

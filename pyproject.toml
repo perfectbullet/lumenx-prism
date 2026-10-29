@@ -21,4 +21,4 @@ pythonpath = ["src"]
 addopts = "-q --tb=short"
 
 [tool.setuptools.package-data]
-lumenx_prism = ["static/*"]
+lumenx_prism = ["static/*", "workflows/*.json"]

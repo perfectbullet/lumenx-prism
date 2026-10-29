@@ -38,6 +38,9 @@ class ModelConfigInput(BaseModel):
             raise ValueError('Connection/model fields must not be placed in parameters')
         if self.kind == 'text' and self.protocol == 'openai_chat':
             ChatParameters.model_validate(self.parameters)
+        if self.kind == 'image' and self.provider == 'comfyui':
+            from .image_schemas import ImageParameters
+            ImageParameters.model_validate(self.parameters)
         return self
 
 
@@ -79,7 +82,8 @@ class ModelConfigs:
         binding = self.collection.find_one({'_id': 'bindings'}) or {}
         return {'items': [self.public(row) for row in rows[:limit]],
                 'has_more': len(rows) > limit, 'limit': limit, 'offset': offset,
-                'entity_extraction_id': binding.get('entity_extraction_id')}
+                'entity_extraction_id': binding.get('entity_extraction_id'),
+                'image_generation_id': binding.get('image_generation_id')}
 
     def get(self, config_id):
         row = self.collection.find_one({'_id': config_id, 'record_type': 'model'})
@@ -104,7 +108,7 @@ class ModelConfigs:
             if result.matched_count != 1:
                 raise ConfigError('model_revision_conflict', 409)
         else:
-            if not key:
+            if not key and not (data['kind']=='image' and data['provider']=='comfyui' and data['protocol']=='custom_http'):
                 raise ConfigError('model_api_key_required', 422)
             config_id = str(uuid4())
             data.update(_id=config_id, record_type='model', schema_version=1,
@@ -140,3 +144,33 @@ class ModelConfigs:
         row = self.get(config_id)
         self.validate_entity_model(row)
         return row
+
+
+    @staticmethod
+    def validate_image_model(row):
+        from .image_schemas import ImageParameters
+        from urllib.parse import urlsplit
+        if not row.get('enabled'):
+            raise ConfigError('model_config_disabled')
+        if row.get('kind')!='image' or row.get('protocol')!='custom_http' or row.get('provider')!='comfyui':
+            raise ConfigError('image_model_incompatible',422)
+        if row.get('model')!='qwen-image-2.1':
+            raise ConfigError('image_model_unsupported',422)
+        ModelConfigInput.model_validate({k:v for k,v in row.items() if k in ModelConfigInput.model_fields})
+        params=ImageParameters.model_validate(row['parameters'])
+        for url in params.peer_base_urls:
+            parts=urlsplit(url)
+            if parts.scheme not in ('http','https') or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment:
+                raise ConfigError('image_peer_url_invalid',422)
+
+    def bind_image_model(self,config_id):
+        self.validate_image_model(self.get(config_id))
+        self.collection.update_one({'_id':'bindings'},{'$set':{'record_type':'bindings',
+            'schema_version':1,'image_generation_id':config_id,'updated_at':datetime.now(timezone.utc)}},upsert=True)
+        return {'image_generation_id':config_id}
+
+    def resolve_image_model(self,config_id=None):
+        if not config_id:
+            config_id=(self.collection.find_one({'_id':'bindings'}) or {}).get('image_generation_id')
+        if not config_id:raise ConfigError('image_model_not_configured',503)
+        row=self.get(str(config_id));self.validate_image_model(row);return row

@@ -1,6 +1,6 @@
 # LumenX Prism
 
-独立 AI 效果服务。当前能力：剧本理解中的角色、场景与道具提取。后续逐项扩展画风分析、分镜、提示词策略、视频增强与一致性评测，不代表这些能力已经实现。
+独立 AI 效果服务。当前能力：剧本实体提取，以及基于 ComfyUI 的角色、场景、道具图片异步生成。后续逐项扩展画风分析、分镜、提示词策略、视频增强与一致性评测，不代表这些能力已经实现。
 
 ## 项目边界
 
@@ -27,10 +27,10 @@ conda activate lumenx_prism
 PYTHONPATH=src python -m lumenx_prism.worker --env-file .env
 ```
 
-worker 默认每秒查队列，每进程同时执行一个任务。可运行多个 worker，MongoDB 原子领取保证同一任务只被一个有效持有者执行；目前没有 GPU 节点容量调度，接入本地生成前需要补充。Ctrl+C / SIGTERM 停止领取新任务，等待当前推理与结果保存后退出。不要为 worker 开启自动 reload。
+worker 默认每秒查队列，每进程同时执行一个任务。可运行多个 worker，MongoDB 原子领取保证同一任务只被一个有效持有者执行；图片任务使用资源组互斥及 ComfyUI 队列预检，尚无通用多 GPU 容量调度。Ctrl+C / SIGTERM 停止领取新任务，等待当前推理与结果保存后退出。不要为 worker 开启自动 reload。
 
 实体提取测试台 http://127.0.0.1:17178/tools/entities （根路径 `/` 也可打开）；API 文档 http://127.0.0.1:17178/docs；`GET /health` 返回 service=lumenx-prism，仅表示存活。
-模型配置页为 http://127.0.0.1:17178/tools/models 。模型名称、API key、API 地址及参数全部保存到 MongoDB 的 `model_comfigs` 集合。`.env` 只配置 MongoDB 连接和服务 token；运行时不读取 `OPENAI_*`、`DASHSCOPE_*` 或 `LLM_PROVIDER`，也不会在数据库出错时回退到环境变量。数据库中的模型修改对新提交即时生效，不需要重启；修改数据库连接或服务 token 仍需重启进程。
+模型配置页为 http://127.0.0.1:17178/tools/models 。模型名称、API key、API 地址及参数全部保存到 MongoDB 的 `model_comfigs` 集合。`.env` 配置 MongoDB 连接、服务 token、媒体目录和公开服务地址；运行时不读取 `OPENAI_*`、`DASHSCOPE_*` 或 `LLM_PROVIDER`，也不会在数据库出错时回退到环境变量。数据库中的模型修改对新提交即时生效，不需要重启；修改数据库连接或服务 token 仍需重启进程。
 
 ## 模型配置
 
@@ -38,7 +38,7 @@ worker 默认每秒查队列，每进程同时执行一个任务。可运行多�
 
 当前实体提取支持 **启用的文本模型 + `openai_chat` 协议**。保存后点击“用于实体提取”完成绑定。同步接口每次从数据库读取绑定及最新配置；异步任务提交时绑定配置 ID/版本，执行时重新从 MongoDB 读取凭据并检查版本和启用状态，不自动回退到其他模型。`base_url` 直接使用保存值（例如包含 `/v1` 或 `/compatible-mode/v1`），不会自动补路径。
 
-语音、图片与视频类型支持定义保存，供后续各自的运行适配器接入；本次没有实现这些生成能力。
+图片已接入下文的 ComfyUI 异步生成；语音和视频仍仅支持配置保存。
 
 `model_comfigs` 保留该集合拼写，包含两类文档：
 
@@ -92,13 +92,13 @@ GET  /v1/jobs?limit=20&offset=0&status=queued
 新增集合：
 
 - `ai_jobs`：唯一的异步任务状态来源。保存类型、输入、组装提示词及哈希、无密钥模型快照、提交指纹、状态、阶段、领取标识、worker ID、租约、时间、结果、usage 和安全错误码。
-- `ai_job_attempts`：执行尝试审计镜像，由 worker 从任务文档补齐；不是第二套调度状态。当前每个任务最多执行一次推理，不提供自动重试或取消接口。
+- `ai_job_attempts`：执行尝试审计镜像，由 worker 从任务文档补齐；不是第二套调度状态。实体提取任务最多执行一次推理；图片任务按候选串行执行，恢复时查询原上游任务，不自动重新提交。当前不提供取消接口。
 
-任务流为 `queued → running → succeeded/failed`。worker 以条件原子更新领取，默认租约60秒、每20秒续期；完成写入还必须匹配领取标识与未过期租约，旧 worker 不能覆盖终态。API 重启不影响任务；worker 未启动时任务留在队列。worker 强制中断后，其他或重启的 worker 会将过期运行任务标记为 `failed / execution_outcome_unknown`，**不会重新提交上游**。同步文本 provider 没有可恢复的任务 ID，此时可能已经发生调用/计费，需人工检查后决定是否以新标识创建任务。恢复检查依赖运行中的 worker；停掉所有 worker 时状态不会自动变化。多机部署需保持时钟同步。
+任务流为 `queued → running → succeeded/failed`。worker 以条件原子更新领取，默认租约60秒、每20秒续期；完成写入还必须匹配领取标识与未过期租约，旧 worker 不能覆盖终态。API 重启不影响任务；worker 未启动时任务留在队列。实体提取 worker 强制中断后，其他或重启的 worker 会将过期运行任务标记为 `failed / execution_outcome_unknown`，**不会重新提交上游**。同步文本 provider 没有可恢复的任务 ID，此时可能已经发生调用/计费，需人工检查后决定是否以新标识创建任务。恢复检查依赖运行中的 worker；停掉所有 worker 时状态不会自动变化。多机部署需保持时钟同步。
 
 提交时固化提示词和配置 ID/版本，不复制 API key。worker 在执行前读取该模型；配置被禁用、删除或版本变化时失败，版本变化错误码为 `model_config_changed`，不会调用新配置替代。切换用途绑定只影响后续新任务。上游错误和非法输出记为失败，不自动重试；结果写库暂时失败最多重试写入3次，绝不因此重做推理。持续写库失败最终按租约过期处理，无法承诺故障下结果必达或上游 exactly-once。
 
-旧 `POST /v1/scripts/extract-entities` 仍保留同步兼容行为和原响应结构；旧的 `entity_extraction_runs` 历史不迁移。新异步任务仅写 `ai_jobs`，不会重复写旧历史。此次没有修改或切换 LumenX 业务调用。图片、视频、分镜 handler 和多推理节点调度尚未实现。
+旧 `POST /v1/scripts/extract-entities` 仍保留同步兼容行为和原响应结构；旧的 `entity_extraction_runs` 历史不迁移。新异步任务仅写 `ai_jobs`，不会重复写旧历史。此次没有修改或切换 LumenX 业务调用。图片 handler 和按资源组串行执行已加入；视频、分镜及通用多节点调度尚未实现。
 
 ## HTTP 接口与接入
 
@@ -197,3 +197,62 @@ PRISM_MONGO_INTEGRATION=1 python -m pytest tests/test_jobs_process_integration.p
 ```
 
 此测试在 `lumenx_prism` 中创建随机 `prism_test_*` 临时集合并在结束后清理，启动独立 API/worker 与本机模拟模型服务。验证 API 重启后排队任务仍可执行、重复提交返回同一任务、强制杀死执行中的 worker 后任务明确失败而不重复推理，以及新 worker 能继续处理后续任务。它不调用真实模型、不改已有模型配置或任务。
+
+## 图片生成与角色参考卡
+
+新增 `POST /v1/images/generate/jobs`，共用 `GET /v1/jobs/{id}`；独立 worker 执行。图片类型包括角色、场景、道具和自由图片。完整角色卡遵循本地 MiniMax-H3 `3d-animation-short-generator` STEP 3：主 3/4、正侧背视图、表情、服装/材质/道具细节、名称和 Visual ID 标签。支持指定二维或三维画风。正式角色版本及审批仍归 LumenX。
+
+启动 API/worker 后打开 `/tools/images`；先在模型配置中添加并绑定 `comfyui / custom_http / image / qwen-image-2.1`。本地 ComfyUI 可不填 API key。参数至少包含 `{"resource_group":"231-gpu0"}`，所有共享同一物理 GPU 的图像配置必须使用同一个 resource_group。建议配置 `peer_base_urls:["http://192.168.8.231:8188"]`，避免与旧实例队列冲突。
+
+也可显式运行（仅修改 Prism 自身模型配置，不覆盖已有图像绑定；加 `--bind` 才替换）：
+
+```bash
+PYTHONPATH=src python scripts/configure_qwen_images.py --env-file .env
+```
+
+`POST /v1/images/preview` 只编译提示词。`POST /v1/media` 使用 multipart 文件上传，返回 id；请求 `reference_media_ids` 按上传后的 ID 有序引用。`GET /v1/media/{id}/download` 沿用服务 token。文件限制32MiB，PNG/JPEG/WebP 单帧，内容解码和哈希校验。媒体目录通过 `PRISM_MEDIA_ROOT` 配置，默认项目下 `data/media`；API 与 worker 必须使用相同绝对目录。231 推荐 `/data/aigc/lumenx-prism/data/media`。`PRISM_PUBLIC_BASE_URL` 可配置远端可达地址来返回绝对下载 URL；未配置返回相对 URL，由客户端相对服务地址解析。
+
+模型参数仅从 `model_comfigs` 读取。新增图片绑定 `image_generation_id`，不改变实体提取绑定。工作流固定为随包发布的 `qwen-image21-v1`，输入冻结模型版本、工作流哈希、角色描述、参考文件哈希和提示词。候选1～4张串行生成，避免一批占满显存。三视图必须有参考图片；全身图、头像和完整卡片可文生图，也可引用已有角色。延续同一角色时推荐使用参考图。
+
+图片运行记录增加内部 executions（不在公共响应暴露），保存提交意图、上游 prompt_id、精确工作流与已完成候选。worker 租约失效后，替代 worker 查询原上游任务；提交结果不确定时按关联标识查找，无法唯一确认则明确失败，保留资源锁供人工核查，不自动重复生成。持有不确定上游任务的 `ai_resources` 记录只能在核对上游终止后人工释放；不能按时间自动删除。资源锁只约束 Prism，外部直接调用 ComfyUI 不受该锁管理。当前不提供任务取消接口。
+
+`ai_media` 保存媒体元数据，文件落盘后才完成任务。结果返回 artifacts、download_url、review_required；成功仅表示文件生成完整，不表示身份一致性自动验收。参考卡的标签、视角和身份特征需人工检查。
+
+LumenX 可通过自己的 `PRISM_IMAGE_SERVICE_URL` 启用 HTTP 接入，上传参考、提交、查询、下载到原有 output/assets，再保存为正式候选。Prism 绝不直接修改业务数据库。不启用时业务调用不变。生成模型以 Prism 绑定为准，旧 LumenX 图片模型选择不控制远端模型。
+
+本轮真实图像链路已在 231 验证：角色卡、引用卡片的头像、场景和道具均生成并回收，单张约22～24秒。角色卡小字、视角标签与表情数量仍有不足；按用户确认先作为 Demo 使用，后续再优化细节。
+
+### 临时关闭服务接口鉴权
+
+本机开发 `.env` 当前设置 `PRISM_SERVICE_AUTH_ENABLED=false`，并注释 `AI_SERVICE_API_KEY`。重启 API 后，所有 Prism 接口无需服务令牌，三个测试页隐藏令牌输入框；上游模型 API key 仍从 MongoDB 正常读取。恢复时设置 `PRISM_SERVICE_AUTH_ENABLED=true`、恢复服务令牌并重启 API，页面也会恢复令牌输入。此开关只控制 Prism HTTP 入口，不影响模型供应商鉴权。
+
+### 图片测试样本库
+
+图片制作台的“选择测试样本”从 Prism MongoDB `image_test_samples` 读取，按风格、人物、场景、道具分组，支持搜索及风格分类。风格与主体分别应用，可自由组合；风格照片用于浏览，生成应用所选正面/负面提示词，不自动把照片中的人物作为身份参考。
+
+样本文档保存 `schema_version`、`kind`、名称/说明、排序、创建时间和 `source` 来源。风格保存正负提示词、分类、适合/避免题材和原图/缩略图媒体 ID；实体样本保存可用的 `ImageRequest` 和缺失信息说明。照片元数据在 `ai_media`，文件保存在 Prism 媒体目录。人物、场景、道具来源为提取任务的结果快照，缺失外观不自动编造。当前导入15种风格及3人物/2场景/4道具。
+
+查询：`GET /v1/image-samples?kind=style&limit=100&offset=0`，类型可省略；详情 `GET /v1/image-samples/{id}`。沿用 Prism 鉴权开关，不开放样本修改接口。样本不是模型配置或业务资产。需要复制初始数据时显式执行：
+
+```bash
+PYTHONPATH=src python scripts/import_image_samples.py --env-file .env \
+  --lumenx-root /path/to/lumenx \
+  --source-job-id 3aab2bb8-6a38-4c3b-bf1f-53b36cb77712
+```
+
+导入仅一次性读取参考 JSON/照片，不导入业务 Python 或连接业务数据库；运行时只读取 Prism 数据。稳定样本 ID 和媒体 ID 支持重复执行，已有样本及手动修改不会被覆盖。选择记录写入新任务 `source_context`，实际输入仍完整保存在任务快照。
+
+点击历史任务仅查看结果；“恢复原输入”显式恢复原请求，包括参考媒体 ID、模型选择、提示词、尺寸、种子与候选数量，清除待上传文件及提交标识。恢复不创建任务；再次提交会使用新的提交标识。
+
+### 角色图片生成顺序（提示词 v3）
+
+推荐“主体全身图定妆 → 头像细化 → 三视图展开 → 完整角色参考卡”。重视五官时也可从头像开始。页面默认从全身图进入；选取人物样本会进入全身图，不再默认请求完整卡。
+
+- `full_body`：单人、单正面视角、从头到脚完整可见；参考图可选，推荐768×1344。
+- `headshot`：单人头肩近景；参考图可选。无图时从文字设计新角色，有图时延续身份；推荐768×1024。
+- `three_view`：同一角色正、侧、背三个视角；必须传参考图，推荐1344×768。
+- `reference_sheet`：汇总3/4、正侧背、表情、服装、道具与身份说明；建议用已确认的参考素材，推荐1344×768。当前仍由模型生成整张卡片，尚未实现程序化拼版。
+
+推荐尺寸只作用于页面，新任务接口仍接受原有合法尺寸。手动改尺寸后切换类型会保留自定义值，可用“采用推荐尺寸”重置；恢复历史保留原始尺寸。单图提示词不带多视图身份重复或“缺少必要视图”负面约束，风格只改变渲染表现，不应取代明确的角色服装。
+
+角色结果下的“准备下一步”沿用该任务的输入、带入参考图并设置下一阶段与推荐尺寸，不自动提交。头像转三视图时保留已有全身参考作为首图，再附头像；其他步骤同样保留有序参考，最多4张。所有新任务保存 `character-production-v3` 提示词版本；已有任务保留提交时的提示词与输入快照，不会被新模板改写。

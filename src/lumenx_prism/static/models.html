@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>模型配置 · LumenX Prism</title><link rel="stylesheet" href="/static/entities.css"><link rel="stylesheet" href="/static/models.css"><script src="/static/models.js" defer></script></head>
 <body><main>
-<header><div><div class="eyebrow">LUMENX <span>PRISM</span> / MODEL REGISTRY</div><h1>模型配置</h1><p class="subtitle">统一管理文本、语音、图像和视频模型，为每项能力选择合适的模型。</p></div><a href="/tools/entities">← 实体提取测试台</a></header>
+<header><a href="/tools/images">图像制作台 ↗</a><div><div class="eyebrow">LUMENX <span>PRISM</span> / MODEL REGISTRY</div><h1>模型配置</h1><p class="subtitle">统一管理文本、语音、图像和视频模型，为每项能力选择合适的模型。</p></div><a href="/tools/entities">← 实体提取测试台</a></header>
 <section class="card connection"><div><label for="token">服务访问令牌 · AI_SERVICE_API_KEY</label><input id="token" type="password" autocomplete="off" placeholder="填写 Prism 服务 token"></div><button id="connect">连接配置库</button><div class="service"><span class="tag" id="connectionState">尚未连接</span><span>配置来源：MongoDB / model_comfigs</span></div><div class="hint full">保存配置、编辑和切换绑定均不会调用模型。保存后下一次提取请求即时生效。模型 API key 在此配置，不再读取环境变量。</div></section>
 <div class="workspace models-workspace">
 <section class="card"><div class="section-head"><h2><span class="step">01</span> <span id="formTitle">新增模型</span></h2><button id="newModel" class="ghost">清空 / 新建</button></div>

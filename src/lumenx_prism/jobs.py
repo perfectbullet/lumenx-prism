@@ -27,8 +27,13 @@ class Jobs:
 
     @staticmethod
     def public(row):
-        return {'id': row['_id'], **{k: v for k, v in row.items()
-                if k not in ('_id', 'idempotency_key', 'request_hash', 'claim_token', 'audit_synced')}}
+        fields = ('type','schema_version','status','phase','created_at','started_at','finished_at',
+                  'duration_ms','request','effective_prompt','prompt_sha256','model_config','provider',
+                  'requested_model','result','error_code','actual_model','usage','text_preview','text_length',
+                  'attempt','worker_id','lease_until','negative_prompt','reference_snapshot','workflow_snapshot',
+                  'prompt_version','skill_revision')
+        return {'id':row['_id'], **{k:row[k] for k in fields if k in row}}
+
 
     @staticmethod
     def fingerprint(request):
@@ -68,8 +73,9 @@ class Jobs:
             raise ConfigError('job_not_found', 404)
         return self.public(row)
 
-    def list(self, limit, offset, status=None):
+    def list(self, limit, offset, status=None, job_type=None):
         query = {'status': status} if status else {}
+        if job_type: query['type'] = job_type
         rows = list(self.collection.find(query, {'request': 0, 'effective_prompt': 0, 'result': 0})
                     .sort([('created_at', -1), ('_id', -1)]).skip(offset).limit(limit + 1))
         return dict(items=[self.public(row) for row in rows[:limit]], has_more=len(rows) > limit,
@@ -77,7 +83,7 @@ class Jobs:
 
     def recover_expired(self):
         # A synchronous upstream call cannot be safely replayed after loss of ownership.
-        self.collection.update_many({'status': 'running', 'lease_until': {'$lte': utcnow()}},
+        self.collection.update_many({'type':'entity_extraction','status': 'running', 'lease_until': {'$lte': utcnow()}},
                                     {'$set': {'status': 'failed', 'phase': 'interrupted',
                                               'error_code': 'execution_outcome_unknown',
                                               'finished_at': utcnow()}})

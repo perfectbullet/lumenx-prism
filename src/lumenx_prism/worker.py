@@ -19,17 +19,21 @@ logger = logging.getLogger(__name__)
 
 
 class Worker:
-    def __init__(self, jobs, configs, adapter_factory=LLMAdapter, lease_seconds=60):
+    def __init__(self, jobs, configs, adapter_factory=LLMAdapter, lease_seconds=60, media=None):
         self.jobs, self.configs, self.adapter_factory = jobs, configs, adapter_factory
         self.lease_seconds = lease_seconds
         self.worker_id = f'{socket.gethostname()}:{os.getpid()}:{uuid4()}'
+        self.image_worker = None
+        if media is not None:
+            from .image_jobs import ImageWorker
+            self.image_worker = ImageWorker(jobs, configs, media, self.worker_id, lease_seconds)
 
     def run_once(self):
         self.jobs.recover_expired()
         self.jobs.mirror_attempts()
         job = self.jobs.claim(self.worker_id, self.lease_seconds)
         if not job:
-            return False
+            return self.image_worker.run_once() if self.image_worker else False
         done, lost = threading.Event(), threading.Event()
 
         def heartbeat():
@@ -102,7 +106,8 @@ def main():
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())
-    worker = Worker(jobs, ModelConfigs(repo.client['lumenx_prism']))
+    from .media import MediaStore
+    worker = Worker(jobs, ModelConfigs(repo.client['lumenx_prism']), media=MediaStore(repo.client['lumenx_prism']))
     try:
         jobs.ensure_indexes()
         logger.info('Worker started: %s', worker.worker_id)
