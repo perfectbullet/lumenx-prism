@@ -13,3 +13,6 @@ logs/
 docs/agents/
 *.code-workspace
 .vscode/settings.json
+
+# Prism service PID receipts and private environment backups.
+run/

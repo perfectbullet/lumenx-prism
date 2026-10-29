@@ -186,7 +186,7 @@ python -m pytest tests/test_chinese_sample.py tests/test_output_parsing.py
 
 ## 环境边界
 
-231 为测试环境，生产为另行管理的 LumenX 服务。Prism 的页面与历史功能在当前仓库内运行，不会自动部署或切换 LumenX 业务调用。业务仓库的 `src/ai_service` 仍有导入依赖，不能直接删除。
+231 为测试环境，生产为另行管理的 LumenX 服务。Prism 已独立部署到231的 `/data/aigc/lumenx-prism`，使用指定 Conda 环境。开发代码同步需显式运行同步脚本，不会切换 LumenX 业务调用。业务仓库的 `src/ai_service` 仍有导入依赖，不能直接删除。
 
 ### 进程级队列验收
 
@@ -256,3 +256,45 @@ PYTHONPATH=src python scripts/import_image_samples.py --env-file .env \
 推荐尺寸只作用于页面，新任务接口仍接受原有合法尺寸。手动改尺寸后切换类型会保留自定义值，可用“采用推荐尺寸”重置；恢复历史保留原始尺寸。单图提示词不带多视图身份重复或“缺少必要视图”负面约束，风格只改变渲染表现，不应取代明确的角色服装。
 
 角色结果下的“准备下一步”沿用该任务的输入、带入参考图并设置下一阶段与推荐尺寸，不自动提交。头像转三视图时保留已有全身参考作为首图，再附头像；其他步骤同样保留有序参考，最多4张。所有新任务保存 `character-production-v3` 提示词版本；已有任务保留提交时的提示词与输入快照，不会被新模板改写。
+
+## 231 独立部署与管理
+
+部署目录 `/data/aigc/lumenx-prism`，解释器 `/home/zenking/miniconda3/envs/lumenx_prism/bin/python`。API 监听 `0.0.0.0:17178`；图片页面为 `http://192.168.8.231:17178/tools/images`，实体页 `/tools/entities`，模型页 `/tools/models`，接口文档 `/docs`。API 和 worker 为独立后台进程，不使用 reload，SSH 断开后继续运行；当前未配置开机自启。
+
+本机执行同步（包含 Prism 自己的 `.env` 和媒体）：
+
+```bash
+./scripts/sync-to-231.sh --dry-run  # 预览，不写远端
+./scripts/sync-to-231.sh            # 同步代码、.env 和 data/media
+./scripts/sync-to-231.sh --code-only # 后续只同步代码和 .env
+```
+
+同步不删除远端文件，不安装依赖、不重启。排除 Git、虚拟环境、缓存、个人 docs/agents 材料和独立 ComfyUI 编排。远端旧 `.env` 备份在 `run/env-backups/`，新 `.env` 权限600；同步后的 `.env` 内容与本机一致，不打印配置内容。
+
+`deploy/231.env` 是无凭据的主机覆盖文件：将媒体根目录设为 `/data/aigc/lumenx-prism/data/media`、公开 URL 设为 `http://192.168.8.231:17178`。服务管理器先读 `.env`，再应用该文件，因此无需把本机路径写成远端路径；数据库、鉴权开关继续沿用同步的 `.env`。
+
+首次部署或依赖变化时，在231安装依赖：
+
+```bash
+cd /data/aigc/lumenx-prism
+/home/zenking/miniconda3/envs/lumenx_prism/bin/python -m pip install \
+  --index-url https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+```
+
+在231管理服务（省略组件名表示 API + worker）：
+
+```bash
+./scripts/prismctl.sh start
+./scripts/prismctl.sh restart
+./scripts/prismctl.sh stop
+./scripts/prismctl.sh status
+./scripts/prismctl.sh logs --lines 100
+./scripts/prismctl.sh logs api -f
+./scripts/prismctl.sh logs worker -f
+# 单独管理组件，例如：
+./scripts/prismctl.sh restart api
+```
+
+也可在本机运行 `ssh zenking@192.168.8.231 /data/aigc/lumenx-prism/scripts/prismctl.sh status`。日志为 `logs/api.log`、`logs/worker.log`。PID 及进程起始标识保存在 `run/`，重复启动不创建第二个进程；只停止记录且校验通过的进程，避免误杀 PID 复用后的其他服务。worker 收到终止信号后完成当前任务再退出，默认最多等待1200秒；超时明确失败，不强杀，也不启动第二个 worker。
+
+首次切换已暂停本机 Prism API/worker，并校验迁移时所有历史媒体。共用同一 Prism 队列时，API 与 worker 应使用相同媒体文件目录；不要直接在本机重新启动 worker 与231混用各自的本地媒体目录。远端运行生成的媒体不会反向同步到本机；后续同步不会删除这些远端文件。
