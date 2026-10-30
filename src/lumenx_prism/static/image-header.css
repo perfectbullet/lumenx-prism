@@ -1,0 +1,10 @@
+/* Match the entities workbench header without changing the image editor panels. */
+header.page-header{display:flex;flex:none;align-items:center;justify-content:space-between;gap:16px;margin:0 0 13px;padding:0;min-width:0;font:13px/1.55 system-ui,"Microsoft Yahei",sans-serif}
+header.page-header>div{flex:none}
+header.page-header h1{font-size:23px;line-height:1.4;margin:2px 0 0;letter-spacing:.3px}
+header.page-header .eyebrow{font-size:10px;line-height:1.5;letter-spacing:2px;color:#9fb7d7;font-weight:650}
+header.page-header nav{display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:6px 18px;min-width:0;margin-left:auto}
+header.page-header nav a{font-size:11px;white-space:nowrap;text-decoration:none;color:#83b2ff}
+header.page-header nav a:hover{color:#c3d8ff}
+@media(min-width:761px) and (max-width:1100px){header.page-header h1{font-size:21px}header.page-header nav{gap:5px 12px}}
+@media(max-width:760px){header.page-header{align-items:flex-start;flex-direction:column;gap:8px;margin-bottom:10px}header.page-header h1{font-size:21px}header.page-header nav{margin:0;justify-content:flex-start;gap:5px 13px}header.page-header nav a{font-size:10px}}

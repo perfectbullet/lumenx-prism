@@ -19,7 +19,7 @@ async function api(path, options={}){
   if(!response.ok){const code=data.detail?.code;const error=Error(errors[code] || (response.status===422?'输入格式无效，请检查长度与字段。':`请求失败（HTTP ${response.status}）`));error.response=response;error.code=code;throw error;}
   return {data,response};
 }
-function setBusy(value){busy=value;for(const id of ['extract','sample','restore','connect','token','script','prompt'])$(id).disabled=value;$('extract').textContent=value?'正在提取…':'提取实体';document.querySelectorAll('.history-row').forEach(node=>node.disabled=value);}
+function setBusy(value){busy=value;for(const id of ['extract','sample','restore','connect','token','script','prompt'])$(id).disabled=value;$('restore').disabled=value||!selectedHistory;$('extract').textContent=value?'正在提取…':'提取实体';document.querySelectorAll('.history-row').forEach(node=>node.disabled=value);}
 function renderResult(result){
   currentResult=result;$('result').replaceChildren();$('raw').textContent=result?JSON.stringify(result,null,2):'本次没有返回实体结果';$('copy').disabled=!result;
   if(!result){$('result').append(textNode('div','本次没有可展示的实体结果。','empty'));return;}
@@ -41,7 +41,7 @@ async function loadHistory(){
   const sequence=++historySequence;
   $('historyStatus').textContent='正在读取历史…';$('prev').disabled=true;$('next').disabled=true;
   try{
-    const query=new URLSearchParams({limit:String(pageSize),offset:String(offset)});if($('historySource').value==='legacy' && $('filter').value==='queued'){$('historyList').replaceChildren();$('historyStatus').textContent='旧同步历史没有排队状态。';return;}if($('filter').value)query.set('status',$('filter').value);
+    const query=new URLSearchParams({limit:String(pageSize),offset:String(offset)});if($('historySource').value==='legacy' && $('filter').value==='queued'){$('historyList').replaceChildren();$('historyStatus').textContent='旧同步历史没有排队状态。';return;}if($('filter').value)query.set('status',$('filter').value);if($('historySource').value!=='legacy')query.set('type','entity_extraction');
     const {data}=await api(`${historyPath()}?${query}`);if(sequence!==historySequence)return;
     $('historyList').replaceChildren();more=data.has_more;
     for(const row of data.items){const button=textNode('button','','history-row');button.disabled=busy;button.append(textNode('span',stateNames[row.status]||row.status,`tag ${row.status==='succeeded'?'ok':row.status==='failed'?'error':'busy'}`),textNode('span',row.text_preview,'title'),textNode('span',meta(row),'meta'));button.onclick=()=>openHistory(row.id);$('historyList').append(button);}
@@ -54,7 +54,7 @@ async function openHistory(id){
   if(busy)return;
   setBusy(true);notice('');
   try{
-    const {data}=await api(`${historyPath()}/${encodeURIComponent(id)}`);selectedHistory=data;
+    const {data}=await api(`${historyPath()}/${encodeURIComponent(id)}`);if(($('historySource').value!=='legacy'&&data.type!=='entity_extraction')||typeof data.request?.text!=='string')throw Error('该记录不是实体提取任务，无法载入剧本。');selectedHistory=data;
     $('resultTitle').textContent='历史结果';renderResult(data.result);$('runMeta').textContent=`${stateNames[data.status]} · ${meta(data)} · ${data.id}`;
     if(data.error_code)notice(errors[data.error_code]||data.error_code);
     if($('historySource').value==='legacy' && data.status==='running')notice('旧同步记录没有后台恢复能力。');
@@ -110,7 +110,7 @@ $('script').oninput=()=>{$('count').textContent=`${[...$('script').value].length
 $('script').onkeydown=event=>{if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();extract();}};
 $('sample').onclick=async()=>{try{const response=await fetch('/static/sample.json');if(!response.ok)throw Error();const sample=await response.json();$('script').value=sample.text;$('prompt').value='';$('script').oninput();$('sampleNote').hidden=false;$('script').focus();}catch{notice('样本加载失败，请直接粘贴剧本。');}};
 $('copy').onclick=async()=>{if(!currentResult)return;try{await navigator.clipboard.writeText(JSON.stringify(currentResult,null,2));$('copy').textContent='已复制';setTimeout(()=>$('copy').textContent='复制 JSON',1600);}catch{notice('剪贴板不可用，请展开原始 JSON 手动复制。');}};
-$('restore').onclick=()=>{if(!selectedHistory||busy)return;$('script').value=selectedHistory.request.text;$('prompt').value=selectedHistory.request.custom_extraction_prompt||'';$('script').oninput();$('script').focus();status('已恢复输入，尚未提交');window.scrollTo({top:0,behavior:'smooth'});};
+$('restore').onclick=()=>{if(!selectedHistory||busy||typeof selectedHistory.request?.text!=='string')return;$('script').value=selectedHistory.request.text;$('prompt').value=selectedHistory.request.custom_extraction_prompt||'';$('script').oninput();$('script').focus();$('script').setSelectionRange(0,0);$('script').scrollTop=0;document.querySelector('.editor-fields')?.scrollTo({top:0});status('已恢复输入，尚未提交');window.scrollTo({top:0,behavior:'smooth'});};
 $('historySource').onchange=()=>{offset=0;$('filter').value='';loadHistory();};
 $('filter').onchange=()=>{offset=0;loadHistory();};$('prev').onclick=()=>{offset=Math.max(0,offset-pageSize);loadHistory();};$('next').onclick=()=>{offset+=pageSize;loadHistory();};
 fetch('/health',{cache:'no-store'}).then(response=>{if(!response.ok)throw Error();$('health').textContent='服务在线';$('health').className='tag ok';}).catch(()=>{$('health').textContent='服务离线';$('health').className='tag error';});
