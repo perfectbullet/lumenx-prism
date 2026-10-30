@@ -13,6 +13,7 @@ logs/
 docs/agents/
 *.code-workspace
 .vscode/settings.json
+deploy/comfyui-qwen-image21/compose.yaml
 
 # Prism service PID receipts and private environment backups.
 run/
