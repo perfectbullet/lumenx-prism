@@ -28,10 +28,13 @@ async function load(){
    const selected=row.id===data.entity_extraction_id;
    const card=el('article','',`model-card${selected?' current':''}`);
    const badges=el('div','','badges');badges.append(el('span',labels[row.kind]||row.kind,'tag'),el('span',row.enabled?'启用':'停用',`tag ${row.enabled?'ok':'error'}`));if(selected)badges.append(el('span','实体提取当前模型','tag ok'));
-   card.append(badges,el('h3',row.name),el('code',`${row.provider} / ${row.model}`),el('p',`${row.protocol} · v${row.revision} · ${row.api_key_set?'API key 已配置':'缺少 API key'}`),el('p',row.base_url));if(row.notes)card.append(el('p',row.notes));
+   card.append(badges,el('h3',row.name),el('code',`${row.provider} / ${row.model}`),el('p',`${row.protocol} · v${row.revision} · ${row.api_key_set?'API key 已配置':row.provider==='comfyui'?'本地服务 · 无需 API key':'缺少 API key'}`),el('p',row.base_url));if(row.notes)card.append(el('p',row.notes));
    const actions=el('div','','actions');const edit=el('button','编辑','ghost');edit.onclick=()=>open(row.id);actions.append(edit);
    if(row.kind==='text'&&row.protocol==='openai_chat'&&row.enabled){const bind=el('button',selected?'已用于实体提取':'用于实体提取',selected?'ghost':'primary');bind.disabled=selected;bind.onclick=()=>bindModel(row.id);actions.append(bind);}
    if(row.kind==='image'&&row.provider==='comfyui'&&row.enabled){const b=el('button',row.id===data.image_generation_id?'当前图像模型':'用于图像生成','primary');b.disabled=row.id===data.image_generation_id;b.onclick=async()=>{try{await api(`${endpoint}/${row.id}/image-generation`,{method:'PUT'});await load();}catch(e){message(e.message);}};actions.append(b);}
+   for(const [kind,usage,label] of [['text','storyboard-generation','分镜规划'],['video','video-generation','视频生成']]){
+    if(row.kind===kind&&row.enabled){const b=el('button','用于'+label,'primary');b.onclick=async()=>{try{await api(`${endpoint}/${row.id}/${usage}`,{method:'PUT'});message('已绑定'+label);await load();}catch(e){message(e.message);}};actions.append(b);}
+   }
    card.append(actions);$('models').append(card);
   }
   $('listStatus').textContent=data.items.length?`本页 ${data.items.length} 个模型`:'暂无配置，可以从左侧新增。';$('prev').disabled=offset===0;$('next').disabled=!data.has_more;$('pageLabel').textContent=`第 ${Math.floor(offset/pageSize)+1} 页`;
@@ -39,14 +42,14 @@ async function load(){
 }
 async function open(id){
  if(busy)return;lock(true);message();
- try{const row=await api(`${endpoint}/${id}`);editing=row;for(const field of ['name','kind','provider','protocol','model','notes'])$(field).value=row[field]||'';$('baseUrl').value=row.base_url;$('apiKey').value='';$('enabled').checked=row.enabled;$('capabilities').value=(row.capabilities||[]).join(', ');$('parameters').value=JSON.stringify(row.parameters||{},null,2);$('formTitle').textContent=`编辑 · ${row.name}`;$('revision').textContent=`版本 ${row.revision}`;$('keyState').textContent=row.api_key_set?'已保存 API key；留空保留，填写新值则替换。':'尚未配置 API key。';window.scrollTo({top:0,behavior:'smooth'});}
+ try{const row=await api(`${endpoint}/${id}`);editing=row;for(const field of ['name','kind','provider','protocol','model','notes'])$(field).value=row[field]||'';$('baseUrl').value=row.base_url;$('apiKey').value='';$('enabled').checked=row.enabled;$('capabilities').value=(row.capabilities||[]).join(', ');$('parameters').value=JSON.stringify(row.parameters||{},null,2);$('formTitle').textContent=`编辑 · ${row.name}`;$('revision').textContent=`版本 ${row.revision}`;$('keyState').textContent=row.api_key_set?'已保存 API key；留空保留，填写新值则替换。':'尚未配置 API key。';document.querySelector('.model-editor .panel-scroll')?.scrollTo({top:0,behavior:'smooth'});}
  catch(error){message(error.message);}finally{lock(false);}
 }
 async function bindModel(id){if(busy)return;lock(true);message();try{await api(`${endpoint}/${id}/entity-extraction`,{method:'PUT'});message('实体提取绑定已更新，下一次请求即生效。');}catch(error){message(error.message);}finally{lock(false);await load();}}
 $('modelForm').onsubmit=async event=>{
  event.preventDefault();if(busy)return;
  let parameters;try{parameters=JSON.parse($('parameters').value||'{}');if(!parameters||Array.isArray(parameters)||typeof parameters!=='object')throw Error();}catch{message('调用参数必须是合法 JSON 对象。');return;}
- if(!editing&&!$('apiKey').value.trim()&&!($('provider').value.trim()==='comfyui'&&$('kind').value==='image'&&$('protocol').value==='custom_http')){message('新增模型需要填写 API key。');return;}
+ if(!editing&&!$('apiKey').value.trim()&&!($('provider').value.trim()==='comfyui'&&['image','video'].includes($('kind').value)&&$('protocol').value==='custom_http')){message('新增模型需要填写 API key。');return;}
  const payload={name:$('name').value.trim(),kind:$('kind').value,provider:$('provider').value.trim(),protocol:$('protocol').value,model:$('model').value.trim(),base_url:$('baseUrl').value.trim(),api_key:$('apiKey').value.trim()||null,enabled:$('enabled').checked,capabilities:$('capabilities').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean),parameters,notes:$('notes').value,revision:editing?.revision||null};
  lock(true);message();
  try{const row=await api(editing?`${endpoint}/${editing.id}`:endpoint,{method:editing?'PUT':'POST',body:JSON.stringify(payload)});editing=row;$('apiKey').value='';$('revision').textContent=`版本 ${row.revision}`;$('formTitle').textContent=`编辑 · ${row.name}`;$('keyState').textContent='已保存 API key；留空保留，填写新值则替换。';message('配置已保存。首次使用时，在列表中点击“用于实体提取”。');offset=0;}
@@ -54,3 +57,6 @@ $('modelForm').onsubmit=async event=>{
 };
 $('kind').onchange=()=>{$('protocol').value={text:'openai_chat',speech:'openai_audio',image:'openai_images',video:'custom_http'}[$('kind').value];};
 $('newModel').onclick=reset;$('connect').onclick=()=>{offset=0;load();};$('refresh').onclick=load;$('prev').onclick=()=>{offset=Math.max(0,offset-pageSize);load();};$('next').onclick=()=>{offset+=pageSize;load();};
+
+try{$('token').value=sessionStorage.getItem('prism.images.serviceToken')||'';}catch{}
+load();

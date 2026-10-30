@@ -46,6 +46,14 @@ async function show(row){
   button.textContent=row.request?.asset_type==='character'?'作为身份参考':'作为参考图';button.onclick=()=>{references=[artifact];refLabel();$('status').textContent='已选择参考图，可生成派生视图。';};
   const view=document.createElement('button');view.className='result-preview';view.setAttribute('aria-label','查看生成图片原图');view.title='点击查看原图';view.append(img);view.onclick=()=>openImageViewer({url,title:row.request?.name||'生成图片',filename:artifact.id+'.png'});
   figure.append(view,a,button);
+  if(['character','scene','prop'].includes(row.request?.asset_type)){
+   const use=document.createElement('button');use.textContent='用于分镜';use.onclick=()=>{
+    try{const name=row.request.name||row.request.character_card?.name||'素材';let chosen=JSON.parse(sessionStorage.getItem('prism.production.assets')||'[]');
+     chosen=chosen.filter(x=>x.name!==name);chosen.push({name,kind:row.request.asset_type,media_id:artifact.id,description:row.request.description||JSON.stringify(row.request.character_card||{})});
+     sessionStorage.setItem('prism.production.assets',JSON.stringify(chosen));location.href='/tools/storyboards';
+    }catch(e){$('status').textContent=e.message;}
+   };figure.append(use);
+  }
   const next={full_body:['headshot','准备下一步：头像'],headshot:['three_view','准备下一步：三视图'],three_view:['reference_sheet','准备下一步：参考卡']}[row.request?.generation_type];
   if(next&&row.request?.asset_type==='character'){const advance=document.createElement('button');advance.textContent=next[1];advance.onclick=()=>prepareNextStage(row,artifact,next[0]);figure.append(advance);}
   $('results').append(figure);

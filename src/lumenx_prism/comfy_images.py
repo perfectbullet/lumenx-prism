@@ -70,6 +70,7 @@ class ComfyImages:
         if not isinstance(q.get('queue_running'),list) or not isinstance(q.get('queue_pending'),list):
             raise ConfigError('comfy_queue_invalid')
         if q['queue_running'] or q['queue_pending']: return False
+        peers=[]
         for base in self.params.peer_base_urls:
             # Peer auth is intentionally not inherited from this provider.
             with httpx.Client(timeout=10,trust_env=False,follow_redirects=False) as client:
@@ -77,6 +78,13 @@ class ComfyImages:
             if not isinstance(peer.get('queue_running'),list) or not isinstance(peer.get('queue_pending'),list):
                 raise ConfigError('comfy_queue_invalid')
             if peer['queue_running'] or peer['queue_pending']: return False
+            peers.append(base)
+        # Caller holds the physical-GPU resource slot. Idle peers must release cached models
+        # before this instance loads a different model (image and H3 share one GPU).
+        for base in peers:
+            with httpx.Client(timeout=30,trust_env=False,follow_redirects=False) as client:
+                response=client.post(base.rstrip('/')+'/free',json={'unload_models':True,'free_memory':True})
+                response.raise_for_status()
         return True
 
     def upload(self, media, snapshot):

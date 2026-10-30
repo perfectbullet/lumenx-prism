@@ -41,6 +41,9 @@ class ModelConfigInput(BaseModel):
         if self.kind == 'image' and self.provider == 'comfyui':
             from .image_schemas import ImageParameters
             ImageParameters.model_validate(self.parameters)
+        if self.kind == 'video' and self.provider == 'comfyui':
+            from .production_schemas import VideoParameters
+            VideoParameters.model_validate(self.parameters)
         return self
 
 
@@ -83,7 +86,9 @@ class ModelConfigs:
         return {'items': [self.public(row) for row in rows[:limit]],
                 'has_more': len(rows) > limit, 'limit': limit, 'offset': offset,
                 'entity_extraction_id': binding.get('entity_extraction_id'),
-                'image_generation_id': binding.get('image_generation_id')}
+                'image_generation_id': binding.get('image_generation_id'),
+                'storyboard_generation_id':binding.get('storyboard_generation_id'),
+                'video_generation_id':binding.get('video_generation_id')}
 
     def get(self, config_id):
         row = self.collection.find_one({'_id': config_id, 'record_type': 'model'})
@@ -108,7 +113,7 @@ class ModelConfigs:
             if result.matched_count != 1:
                 raise ConfigError('model_revision_conflict', 409)
         else:
-            if not key and not (data['kind']=='image' and data['provider']=='comfyui' and data['protocol']=='custom_http'):
+            if not key and not (data['kind'] in ('image','video') and data['provider']=='comfyui' and data['protocol']=='custom_http'):
                 raise ConfigError('model_api_key_required', 422)
             config_id = str(uuid4())
             data.update(_id=config_id, record_type='model', schema_version=1,
@@ -174,3 +179,29 @@ class ModelConfigs:
             config_id=(self.collection.find_one({'_id':'bindings'}) or {}).get('image_generation_id')
         if not config_id:raise ConfigError('image_model_not_configured',503)
         row=self.get(str(config_id));self.validate_image_model(row);return row
+
+    def resolve_production_model(self,kind,config_id=None):
+        if kind not in ('storyboard_generation','video_generation'):raise ConfigError('model_usage_invalid',422)
+        if not config_id:config_id=(self.collection.find_one({'_id':'bindings'}) or {}).get(kind+'_id')
+        if not config_id:raise ConfigError(kind+'_model_not_configured')
+        row=self.get(str(config_id))
+        if kind=='storyboard_generation':self.validate_entity_model(row)
+        else:
+            from .production_schemas import VideoParameters
+            from urllib.parse import urlsplit
+            if not row.get('enabled'):raise ConfigError('model_config_disabled')
+            if (row['kind'],row['provider'],row['protocol'],row['model'])!=('video','comfyui','custom_http','minimax-h3-ref2va'):
+                raise ConfigError('video_model_incompatible',422)
+            ModelConfigInput.model_validate({k:v for k,v in row.items() if k in ModelConfigInput.model_fields})
+            parameters=VideoParameters.model_validate(row['parameters'])
+            for url in parameters.peer_base_urls:
+                parts=urlsplit(url)
+                if parts.scheme not in ('http','https') or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment:
+                    raise ConfigError('video_peer_url_invalid',422)
+        return row
+
+    def bind_production_model(self,kind,config_id):
+        self.resolve_production_model(kind,config_id)
+        self.collection.update_one({'_id':'bindings'},{'$set':{'record_type':'bindings','schema_version':1,
+            kind+'_id':str(config_id),'updated_at':datetime.now(timezone.utc)}},upsert=True)
+        return {kind+'_id':str(config_id)}

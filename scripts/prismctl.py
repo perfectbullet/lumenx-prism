@@ -80,7 +80,7 @@ def start(component, env):
                    '--env-file', str(ROOT / '.env'), '--host', env.get('PRISM_BIND_HOST', '0.0.0.0'),
                    '--port', env.get('PRISM_PORT', '17178')]
     else:
-        command = [sys.executable, '-m', 'lumenx_prism.worker', '--env-file', str(ROOT / '.env')]
+        command = [sys.executable, '-m', 'lumenx_prism.worker', '--env-file', str(ROOT / '.env'), '--capabilities', 'text' if component=='text-worker' else 'gpu']
     log_path = LOGS / (component + '.log')
     with log_path.open('ab') as log:
         log.write(f'\n[{datetime.now(timezone.utc).isoformat()}] Starting {component}\n'.encode())
@@ -100,7 +100,7 @@ def start(component, env):
         if component == 'api' and api_ready(env):
             print(f'{component}: started (PID {process.pid})')
             return
-        if component == 'worker' and _ >= 10:
+        if component != 'api' and _ >= 10:
             print(f'{component}: started (PID {process.pid})')
             return
         time.sleep(.1)
@@ -127,7 +127,7 @@ def stop(component, timeout):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['start', 'restart', 'stop', 'status', 'logs'])
-    parser.add_argument('component', choices=['all', 'api', 'worker'], default='all', nargs='?')
+    parser.add_argument('component', choices=['all', 'api', 'worker', 'text-worker'], default='all', nargs='?')
     parser.add_argument('--lines', type=int, default=100)
     parser.add_argument('--follow', '-f', action='store_true')
     parser.add_argument('--timeout', type=float, default=1200, help='Graceful worker shutdown timeout, seconds')
@@ -135,7 +135,7 @@ def main():
     if args.lines < 1 or args.timeout <= 0:
         parser.error('lines and timeout must be positive')
     RUN.mkdir(mode=0o700, exist_ok=True); LOGS.mkdir(mode=0o700, exist_ok=True)
-    components = ['api', 'worker'] if args.component == 'all' else [args.component]
+    components = ['api', 'worker', 'text-worker'] if args.component == 'all' else [args.component]
     if args.action == 'logs':
         paths = [LOGS / (component + '.log') for component in components]
         for path in paths:

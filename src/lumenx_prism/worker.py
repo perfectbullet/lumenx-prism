@@ -19,20 +19,27 @@ logger = logging.getLogger(__name__)
 
 
 class Worker:
-    def __init__(self, jobs, configs, adapter_factory=LLMAdapter, lease_seconds=60, media=None):
+    def __init__(self, jobs, configs, adapter_factory=LLMAdapter, lease_seconds=60, media=None, capabilities='all'):
         self.jobs, self.configs, self.adapter_factory = jobs, configs, adapter_factory
         self.lease_seconds = lease_seconds
         self.worker_id = f'{socket.gethostname()}:{os.getpid()}:{uuid4()}'
+        self.capabilities=capabilities
+        self.production_worker=None
         self.image_worker = None
         if media is not None:
+            from .production_worker import ProductionWorker
+            kinds=['storyboard_generation'] if capabilities=='text' else ['video_generation','video_assembly'] if capabilities=='gpu' else ['storyboard_generation','video_generation','video_assembly']
+            self.production_worker=ProductionWorker(jobs,configs,media,self.worker_id,kinds,lease_seconds)
+        if media is not None and capabilities!='text':
             from .image_jobs import ImageWorker
             self.image_worker = ImageWorker(jobs, configs, media, self.worker_id, lease_seconds)
 
     def run_once(self):
         self.jobs.recover_expired()
         self.jobs.mirror_attempts()
-        job = self.jobs.claim(self.worker_id, self.lease_seconds)
+        job = self.jobs.claim(self.worker_id, self.lease_seconds) if self.capabilities!='gpu' else None
         if not job:
+            if self.production_worker and self.production_worker.run_once():return True
             return self.image_worker.run_once() if self.image_worker else False
         done, lost = threading.Event(), threading.Event()
 
@@ -95,6 +102,7 @@ class Worker:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--env-file', default='.env')
+    parser.add_argument('--capabilities', choices=['all','text','gpu'],default='all')
     parser.add_argument('--poll-seconds', type=float, default=1)
     args = parser.parse_args()
     if args.poll_seconds <= 0:
@@ -107,7 +115,7 @@ def main():
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())
     from .media import MediaStore
-    worker = Worker(jobs, ModelConfigs(repo.client['lumenx_prism']), media=MediaStore(repo.client['lumenx_prism']))
+    worker = Worker(jobs, ModelConfigs(repo.client['lumenx_prism']), media=MediaStore(repo.client['lumenx_prism']),capabilities=args.capabilities)
     try:
         jobs.ensure_indexes()
         logger.info('Worker started: %s', worker.worker_id)

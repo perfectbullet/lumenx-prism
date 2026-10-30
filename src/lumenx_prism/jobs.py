@@ -73,9 +73,11 @@ class Jobs:
             raise ConfigError('job_not_found', 404)
         return self.public(row)
 
-    def list(self, limit, offset, status=None, job_type=None):
+    def list(self, limit, offset, status=None, job_type=None, draft_id=None, revision=None):
         query = {'status': status} if status else {}
         if job_type: query['type'] = job_type
+        if draft_id: query['request.draft_id']=str(draft_id)
+        if revision is not None: query['request.revision']=revision
         rows = list(self.collection.find(query, {'request': 0, 'effective_prompt': 0, 'result': 0})
                     .sort([('created_at', -1), ('_id', -1)]).skip(offset).limit(limit + 1))
         return dict(items=[self.public(row) for row in rows[:limit]], has_more=len(rows) > limit,

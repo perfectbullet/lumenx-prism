@@ -262,10 +262,11 @@ def submit_entity_job(payload: EntityExtractionRequest, response: Response,
 def list_jobs(response: Response, limit: int = Query(20, ge=1, le=100),
               offset: int = Query(0, ge=0, le=10000),
               status: Literal['queued', 'running', 'succeeded', 'failed'] | None = None,
-              job_type: Literal['entity_extraction', 'image_generation'] | None = Query(None, alias='type'),
+              job_type: Literal['entity_extraction', 'image_generation','storyboard_generation','video_generation','video_assembly'] | None = Query(None, alias='type'),
+              draft_id: UUID | None = None, revision: int | None = Query(None,ge=1),
               jobs=Depends(get_jobs)):
     response.headers['Cache-Control'] = 'no-store'
-    return job_operation(lambda: jobs.list(limit, offset, status, job_type))
+    return job_operation(lambda: jobs.list(limit, offset, status, job_type, draft_id, revision))
 
 
 @app.get('/v1/jobs/{job_id}', dependencies=[Depends(require_service_auth)])
@@ -374,3 +375,82 @@ def list_image_samples(response: Response,
 def image_sample_detail(sample_id: UUID, response: Response, samples=Depends(get_image_samples)):
     response.headers['Cache-Control'] = 'no-store'
     return sample_operation(lambda: samples.get(str(sample_id)))
+
+
+# Short-film planning and H3 video production. Existing contracts remain unchanged.
+from .production_schemas import BoardInput, DraftInput, VideoInput, AssemblyInput, BoardContent
+from .production_jobs import ProductionJobs
+from .storyboards import Drafts, compile_video
+
+@app.get('/tools/storyboards',include_in_schema=False)
+def storyboard_page(): return console_page('storyboards.html')
+
+@app.get('/tools/videos',include_in_schema=False)
+def video_page(): return console_page('videos.html')
+
+@app.put('/v1/model-configs/{config_id}/storyboard-generation',dependencies=[Depends(require_service_auth)])
+def bind_storyboard(config_id: UUID,configs=Depends(get_model_configs)):
+    return config_operation(lambda:configs.bind_production_model('storyboard_generation',str(config_id)))
+
+@app.put('/v1/model-configs/{config_id}/video-generation',dependencies=[Depends(require_service_auth)])
+def bind_video(config_id: UUID,configs=Depends(get_model_configs)):
+    return config_operation(lambda:configs.bind_production_model('video_generation',str(config_id)))
+
+def production_submit(kind,payload,key,response,jobs,configs,media):
+    repo=ProductionJobs(jobs.collection.database)
+    row=job_operation(lambda:repo.submit_new(kind,payload,key,configs,media))
+    response.headers['Cache-Control']='no-store';response.headers['Location']='/v1/jobs/'+row['id']
+    return row
+
+@app.post('/v1/storyboards/generate/jobs',status_code=202,dependencies=[Depends(require_service_auth)])
+def submit_board(payload:BoardInput,response:Response,idempotency_key:str=Header(min_length=1,max_length=128),
+                 jobs=Depends(get_jobs),configs=Depends(get_model_configs),media=Depends(get_media)):
+    return production_submit('storyboard_generation',payload,idempotency_key,response,jobs,configs,media)
+
+@app.post('/v1/videos/generate/jobs',status_code=202,dependencies=[Depends(require_service_auth)])
+def submit_video(payload:VideoInput,response:Response,idempotency_key:str=Header(min_length=1,max_length=128),
+                 jobs=Depends(get_jobs),configs=Depends(get_model_configs),media=Depends(get_media)):
+    return production_submit('video_generation',payload,idempotency_key,response,jobs,configs,media)
+
+@app.post('/v1/videos/assemble/jobs',status_code=202,dependencies=[Depends(require_service_auth)])
+def submit_assembly(payload:AssemblyInput,response:Response,idempotency_key:str=Header(min_length=1,max_length=128),
+                 jobs=Depends(get_jobs),configs=Depends(get_model_configs),media=Depends(get_media)):
+    return production_submit('video_assembly',payload,idempotency_key,response,jobs,configs,media)
+
+@app.get('/v1/storyboards',dependencies=[Depends(require_service_auth)])
+def list_boards(response:Response,jobs=Depends(get_jobs)):
+    response.headers['Cache-Control']='no-store'
+    return job_operation(lambda:Drafts(jobs.collection.database).list())
+
+@app.get('/v1/storyboards/{draft_id}',dependencies=[Depends(require_service_auth)])
+def get_board(draft_id:UUID,response:Response,jobs=Depends(get_jobs)):
+    response.headers['Cache-Control']='no-store'
+    return job_operation(lambda:Drafts(jobs.collection.database).get(str(draft_id)))
+
+@app.post('/v1/storyboards',status_code=201,dependencies=[Depends(require_service_auth)])
+def create_board(payload:DraftInput,jobs=Depends(get_jobs)):
+    return job_operation(lambda:Drafts(jobs.collection.database).save(payload))
+
+@app.put('/v1/storyboards/{draft_id}',dependencies=[Depends(require_service_auth)])
+def update_board(draft_id:UUID,payload:DraftInput,jobs=Depends(get_jobs)):
+    return job_operation(lambda:Drafts(jobs.collection.database).save(payload,str(draft_id)))
+
+@app.get('/v1/storyboards/{draft_id}/shots/{shot_id}/prompt',dependencies=[Depends(require_service_auth)])
+def shot_prompt(draft_id:UUID,shot_id:str,response:Response,jobs=Depends(get_jobs)):
+    def compile():
+        draft=Drafts(jobs.collection.database).get(str(draft_id))
+        shot=next((s for s in BoardContent.model_validate(draft['content']).shots if s.id==shot_id),None)
+        if not shot:raise ConfigError('shot_not_found',404)
+        return {'prompt':compile_video(BoardInput.model_validate(draft['input']),shot),'revision':draft['revision']}
+    response.headers['Cache-Control']='no-store'
+    return job_operation(compile)
+
+
+@app.post('/v1/jobs/{job_id}/recover-video',dependencies=[Depends(require_service_auth)])
+def recover_video(job_id:UUID,jobs=Depends(get_jobs)):
+    return job_operation(lambda:ProductionJobs(jobs.collection.database).recover_video(str(job_id)))
+
+
+@app.post('/v1/jobs/{job_id}/recover-storyboard',dependencies=[Depends(require_service_auth)])
+def recover_storyboard(job_id:UUID,jobs=Depends(get_jobs)):
+    return job_operation(lambda:ProductionJobs(jobs.collection.database).recover_board(str(job_id)))

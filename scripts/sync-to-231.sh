@@ -27,6 +27,10 @@ for name in src scripts tests workflows deploy pyproject.toml requirements.txt r
   [[ ! -e "$project_root/$name" ]] || paths+=("$project_root/$name")
 done
 rsync "${options[@]}" "${paths[@]}" "$ssh_target:$remote_dir/"
+if [[ -f "$project_root/docs/video-production.md" ]]; then
+  if ! $dry_run; then ssh "$ssh_target" "mkdir -p $remote_q/docs"; fi
+  rsync "${options[@]}" "$project_root/docs/video-production.md" "$ssh_target:$remote_dir/docs/"
+fi
 if $sync_media; then
   media_source="$("$local_python" - "$project_root" <<'PY'
 from pathlib import Path
