@@ -32,8 +32,8 @@ async function load(){
    const actions=el('div','','actions');const edit=el('button','编辑','ghost');edit.onclick=()=>open(row.id);actions.append(edit);
    if(row.kind==='text'&&row.protocol==='openai_chat'&&row.enabled){const bind=el('button',selected?'已用于实体提取':'用于实体提取',selected?'ghost':'primary');bind.disabled=selected;bind.onclick=()=>bindModel(row.id);actions.append(bind);}
    if(row.kind==='image'&&row.provider==='comfyui'&&row.enabled){const b=el('button',row.id===data.image_generation_id?'当前图像模型':'用于图像生成','primary');b.disabled=row.id===data.image_generation_id;b.onclick=async()=>{try{await api(`${endpoint}/${row.id}/image-generation`,{method:'PUT'});await load();}catch(e){message(e.message);}};actions.append(b);}
-   for(const [kind,usage,label] of [['text','storyboard-generation','分镜规划'],['video','video-generation','视频生成']]){
-    if(row.kind===kind&&row.enabled){const b=el('button','用于'+label,'primary');b.onclick=async()=>{try{await api(`${endpoint}/${row.id}/${usage}`,{method:'PUT'});message('已绑定'+label);await load();}catch(e){message(e.message);}};actions.append(b);}
+   for(const [kind,usage,label] of [['text','image-polish','图像描述润色'],['text','storyboard-generation','分镜规划'],['video','video-generation','视频生成']]){
+    if(row.kind===kind&&row.enabled){const selectedUsage=row.id===data[usage.replaceAll('-','_')+'_id'];const b=el('button',(selectedUsage?'当前':'用于')+label,'primary');b.disabled=selectedUsage;b.onclick=async()=>{try{await api(`${endpoint}/${row.id}/${usage}`,{method:'PUT'});message('已绑定'+label);await load();}catch(e){message(e.message);}};actions.append(b);}
    }
    card.append(actions);$('models').append(card);
   }

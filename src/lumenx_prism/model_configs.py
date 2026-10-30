@@ -88,7 +88,8 @@ class ModelConfigs:
                 'entity_extraction_id': binding.get('entity_extraction_id'),
                 'image_generation_id': binding.get('image_generation_id'),
                 'storyboard_generation_id':binding.get('storyboard_generation_id'),
-                'video_generation_id':binding.get('video_generation_id')}
+                'video_generation_id':binding.get('video_generation_id'),
+                'image_polish_id':binding.get('image_polish_id')}
 
     def get(self, config_id):
         row = self.collection.find_one({'_id': config_id, 'record_type': 'model'})
@@ -181,11 +182,11 @@ class ModelConfigs:
         row=self.get(str(config_id));self.validate_image_model(row);return row
 
     def resolve_production_model(self,kind,config_id=None):
-        if kind not in ('storyboard_generation','video_generation'):raise ConfigError('model_usage_invalid',422)
+        if kind not in ('storyboard_generation','video_generation','image_polish'):raise ConfigError('model_usage_invalid',422)
         if not config_id:config_id=(self.collection.find_one({'_id':'bindings'}) or {}).get(kind+'_id')
         if not config_id:raise ConfigError(kind+'_model_not_configured')
         row=self.get(str(config_id))
-        if kind=='storyboard_generation':self.validate_entity_model(row)
+        if kind in ('storyboard_generation','image_polish'):self.validate_entity_model(row)
         else:
             from .production_schemas import VideoParameters
             from urllib.parse import urlsplit

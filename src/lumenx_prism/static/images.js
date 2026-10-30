@@ -30,7 +30,7 @@ async function upload(){
  }
  $('files').value='';
 }
-function lock(value){busy=value;$('restoreInput').disabled=value||!currentJob;for(const id of ['generate','preview','files','chooseCharacterSample','chooseSceneSample','choosePropSample','chooseStyle','clearRefs','randomSeed'])$(id).disabled=value;}
+function lock(value){busy=value;$('restoreInput').disabled=value||!currentJob;for(const id of ['generate','preview','files','chooseCharacterSample','chooseSceneSample','choosePropSample','chooseStyle','clearRefs','randomSeed'])$(id).disabled=value;window.PrismPolish?.refreshButton();}
 async function show(row){
  currentJob=row.type==='image_generation'?row:null;$('restoreInput').disabled=busy||!currentJob?.request;
  $('jobId').value=row.id;
@@ -111,7 +111,7 @@ function updateDescriptionLabel(){
  const names={character:'外貌描述',scene:'场景描述',prop:'道具描述',image:'画面描述'};
  const hints={character:'描述五官、发型、体型和服装',scene:'描述空间、布局、光线和固定地标',prop:'描述外形、材质、颜色和功能',image:'描述希望生成的画面'};
  $('descriptionLabel').textContent=names[kind];$('description').placeholder=hints[kind];
- $('polishDescription').setAttribute('aria-label',names[kind]+'润色，待实现');
+ $('polishDescription').setAttribute('aria-label',names[kind]+'润色，确认后应用');
 }
 $('randomSeed').onclick=()=>{
  if(busy)return;

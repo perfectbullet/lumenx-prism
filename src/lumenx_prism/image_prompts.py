@@ -6,7 +6,7 @@ import re
 from .image_schemas import ImageRequest
 from .style_rules import adapt_visual_style
 
-PROMPT_VERSION = 'asset-production-v5'
+PROMPT_VERSION = 'asset-production-v6'
 SKILL_REVISION = '199b7d0e1fd95e7b3eafa8c15eca692534142427'
 
 
@@ -15,14 +15,27 @@ def compile_image_prompt(request: ImageRequest):
     negative = r.negative_prompt
     parts = [f'Asset: {r.name}. {r.description}', r.prompt]
     single_instruction = None
+    appearance_directive = None
     if r.character_card:
         card = r.character_card
+        parts = [f'Character: {r.name}.', r.prompt]
+        current = [('年龄 / Age',card.age_range),('体型 / Body type',card.body_type),
+                   ('发型 / Hairstyle',card.hairstyle),('服装及颜色 / Required outfit',card.costume)]
+        appearance_directive = ('本次权威角色细节 / CURRENT REQUIRED APPEARANCE: '+
+            '；'.join(label+': '+value for label,value in current if value)+'. '+
+            '不可改变的身份特征优先；其余当前非空细节覆盖辅助描述和参考图中冲突的旧年龄、发型与服装。'
+            'Current explicit details override conflicting older age, hair and clothing in background descriptions or references. '
+            'Keep the immutable identity traits. Render the specified current outfit and age.')
         identity = '; '.join(card.immutable_traits)
         specification = card.model_dump()
         if r.generation_type != 'reference_sheet':
             specification.pop('expressions', None)
-        parts += ['Identity lock: ' + identity,
+        parts += [appearance_directive, 'Identity lock: ' + identity,
                   'Character appearance: ' + json.dumps(specification, ensure_ascii=False)]
+        if r.description:
+            parts += ['辅助外貌描述（低优先级；仅补充当前角色细节未说明的内容；忽略冲突的旧值） / Secondary background description: '+r.description]
+        if card.props:
+            parts += ['道具只呈现明确的实体物品；习惯、喜好不直接推断为胡须或手持物。 Only explicit physical props are drawable; preferences do not imply facial hair or held objects.']
         if r.generation_type == 'reference_sheet':
             parts += [
                 'Create a labeled production CHARACTER REFERENCE CARD, landscape layout. '
@@ -107,13 +120,15 @@ def compile_image_prompt(request: ImageRequest):
 
     if r.reference_media_ids:
         if r.asset_type == 'character':
-            reference_rule = 'Preserve the character identity and costume from image 1; use additional images as supplied visual references.'
+            reference_rule = 'Preserve the character identity from image 1; current explicit character details override conflicting reference hair or outfit. Use additional images as supplied visual references.'
         else:
             reference_rule = 'Preserve the described environment or object from the supplied visual references.'
         parts += ['The attached reference images are ordered: ' + ', '.join(
             f'image {i+1}' for i in range(len(r.reference_media_ids))) + '. ' + reference_rule]
     style = adapt_visual_style(r.style, r.asset_type)['effective']
     parts += ['Visual style: ' + style]
+    if appearance_directive:
+        parts += [appearance_directive]
     if single_instruction:
         parts = [single_instruction] + parts + [single_instruction]
     if r.generation_type == 'reference_sheet':

@@ -4,9 +4,9 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>图像制作台 · LumenX Prism</title>
 <link rel="stylesheet" href="/static/entities.css">
-<link rel="stylesheet" href="/static/images.css?v=20261030-production1">
-<script src="/static/request-utils.js?v=20261030-production1" defer></script>
-<script src="/static/images.js?v=20261030-production1" defer></script>
+<link rel="stylesheet" href="/static/images.css?v=20261030-polish2">
+<script src="/static/request-utils.js?v=20261030-polish2" defer></script>
+<script src="/static/images.js?v=20261030-polish2" defer></script>
 <link rel="stylesheet" href="/static/image-header.css?v=20261030-header1">
 </head>
 <body><main>
@@ -21,12 +21,12 @@
    <label>输出类型<select id="generationType"><option value="full_body">主体全身图（可选参考）</option><option value="headshot">头像（可选参考）</option><option value="three_view">三视图（需参考图）</option><option value="reference_sheet">完整角色参考卡（建议参考）</option></select></label>
    <div class="wide character-field generation-guide"><strong>推荐：全身定妆 → 头像细化 → 三视图 → 完整参考卡</strong><p id="generationHelp" class="hint"></p></div>
    <label>名称<input id="name" maxlength="100" value="林夏"></label><label>角色作用<input id="role" value="主角"></label>
-   <div class="wide description-field"><div class="description-heading"><label id="descriptionLabel" for="description">外貌描述</label><button id="polishDescription" class="ghost" type="button" disabled title="润色功能待实现，暂不调用模型">润色（待实现）</button></div><textarea id="description" maxlength="6000" rows="2" placeholder="描述五官、发型、体型和服装"></textarea></div>
+   <div class="wide description-field"><div class="description-heading"><label id="descriptionLabel" for="description">外貌描述</label><button id="polishDescription" class="ghost" type="button" title="综合当前描述和角色细节润色，确认后再应用">润色</button></div><textarea id="description" maxlength="6000" rows="2" placeholder="描述五官、发型、体型和服装"></textarea></div>
    <label class="wide">画风<textarea id="style" maxlength="4000" rows="2" placeholder="例如：二维赛璐璐；留空采用柔和三维动画风格"></textarea><span class="hint">按资产类型适配风格，预览可查看实际词条与移除项。</span></label>
    <label class="wide character-field">不可改变的身份特征 · 每行一项<textarea id="traits" rows="2" placeholder="角色必填，例如发型、瞳色、标志性服装"></textarea></label>
   </div>
-  <details class="advanced character-details"><summary>角色细节 <span>年龄、体型、服装、表情与道具</span></summary>
-   <div class="fields"><label>年龄段<input id="age"></label><label>体型<input id="body"></label><label>发型<input id="hair"></label><label>服装及颜色<input id="costume"></label><label>标志性道具 · 每行一项<textarea id="props" rows="2"></textarea></label><label>表情 · 每行一项<textarea id="expressions" rows="2">neutral
+  <details class="advanced character-details"><summary>角色细节 <span>年龄、体型、服装、表情与道具</span></summary><p class="hint">当前非空细节优先于旧外貌描述；不可改变的身份特征仍需保持一致。可点击润色统一描述。</p>
+   <div class="fields"><label>年龄段<input id="age"></label><label>体型<input id="body"></label><label>发型<input id="hair"></label><label>服装及颜色<input id="costume"></label><label>标志性道具 · 每行一项<textarea id="props" rows="2" placeholder="例如：黑框眼镜、咖啡杯"></textarea><span class="hint">填写具体物品；胡须写入外貌描述，喜好不等于手持道具。</span></label><label>表情 · 每行一项<textarea id="expressions" rows="2">neutral
 happy
 sad
 angry</textarea></label></div>
@@ -56,4 +56,11 @@ angry</textarea></label></div>
  <div id="viewerStage" class="viewer-stage" tabindex="0" aria-label="原图预览，原始尺寸下可滚动查看"><img id="viewerImage" alt="原图"></div>
  <p id="viewerStatus" role="status">正在加载原图…</p>
 </dialog>
+<dialog id="polishDialog" class="sample-dialog polish-dialog" aria-labelledby="polishTitle">
+ <div class="dialog-heading"><div><h2 id="polishTitle">描述润色 · 确认后应用</h2><p class="hint">仅处理文字，不分析参考图，也不自动生成图片。</p></div><button id="closePolish" class="ghost">关闭</button></div>
+ <div class="polish-body"><div class="polish-columns"><section><h3>润色前</h3><pre id="polishBefore"></pre></section><section><h3>润色建议</h3><label for="polishDescriptionText">外貌 / 场景 / 道具描述（可继续编辑）</label><textarea id="polishDescriptionText" rows="7"></textarea><pre id="polishAfter"></pre></section></div>
+ <div id="polishWarnings" class="polish-warnings" role="status"></div><p id="polishState" class="hint"></p></div>
+ <footer class="polish-footer"><button id="cancelPolish">取消</button><button id="applyPolish" class="primary">应用到表单</button></footer>
+</dialog>
+<script src="/static/image-polish.js?v=20261030-polish2" defer></script>
 </body></html>

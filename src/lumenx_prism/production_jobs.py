@@ -24,7 +24,10 @@ class ProductionJobs(ImageJobs):
         self.ensure_indexes();old=self.existing_for(kind,key,payload)
         if old:return old
         request=payload.model_dump(mode='json');config=None;refs=[];prompt='';workflow=None
-        if kind=='storyboard_generation':
+        if kind=='image_polish':
+            from .image_polish import polish_prompt
+            config=configs.resolve_production_model('image_polish');prompt=polish_prompt(payload)
+        elif kind=='storyboard_generation':
             config=configs.resolve_production_model('storyboard_generation')
             if payload.source_entity_job_id:
                 source=self.get(str(payload.source_entity_job_id))
@@ -57,7 +60,7 @@ class ProductionJobs(ImageJobs):
         row=dict(_id=str(uuid4()),schema_version=1,type=kind,status='queued',phase='queued',created_at=utcnow(),
             started_at=None,finished_at=None,duration_ms=None,request=request,idempotency_key=key,
             request_hash=self.digest(kind,payload),effective_prompt=prompt,prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest(),
-            prompt_version=PROMPT_VERSION,reference_snapshot=refs,workflow_snapshot=workflow,
+            prompt_version='asset-description-polish-v1' if kind=='image_polish' else PROMPT_VERSION,reference_snapshot=refs,workflow_snapshot=workflow,
             model_config=ModelConfigs.snapshot(config) if config else None,provider=config['provider'] if config else 'ffmpeg',
             requested_model=config['model'] if config else 'preview-assembly',result=None,error_code=None,
             attempt=0,worker_id=None,lease_until=None,execution=None)
@@ -66,7 +69,7 @@ class ProductionJobs(ImageJobs):
         return self.public(row)
     def claim_production(self,worker_id,kinds,lease_seconds):
         now=utcnow()
-        self.collection.update_many({'type':'storyboard_generation','status':'running','lease_until':{'$lte':now},'phase':'inference'},
+        self.collection.update_many({'type':{'$in':['storyboard_generation','image_polish']},'status':'running','lease_until':{'$lte':now},'phase':'inference'},
             {'$set':{'status':'failed','phase':'interrupted','error_code':'execution_outcome_unknown','finished_at':now}})
         row=self.collection.find_one_and_update({'type':{'$in':kinds},'$or':[
             {'status':'queued','$or':[{'not_before':{'$exists':False}},{'not_before':{'$lte':now}}]},

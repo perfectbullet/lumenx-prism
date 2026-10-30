@@ -262,7 +262,7 @@ def submit_entity_job(payload: EntityExtractionRequest, response: Response,
 def list_jobs(response: Response, limit: int = Query(20, ge=1, le=100),
               offset: int = Query(0, ge=0, le=10000),
               status: Literal['queued', 'running', 'succeeded', 'failed'] | None = None,
-              job_type: Literal['entity_extraction', 'image_generation','storyboard_generation','video_generation','video_assembly'] | None = Query(None, alias='type'),
+              job_type: Literal['entity_extraction', 'image_generation','storyboard_generation','video_generation','video_assembly','image_polish'] | None = Query(None, alias='type'),
               draft_id: UUID | None = None, revision: int | None = Query(None,ge=1),
               jobs=Depends(get_jobs)):
     response.headers['Cache-Control'] = 'no-store'
@@ -454,3 +454,15 @@ def recover_video(job_id:UUID,jobs=Depends(get_jobs)):
 @app.post('/v1/jobs/{job_id}/recover-storyboard',dependencies=[Depends(require_service_auth)])
 def recover_storyboard(job_id:UUID,jobs=Depends(get_jobs)):
     return job_operation(lambda:ProductionJobs(jobs.collection.database).recover_board(str(job_id)))
+
+
+from .image_polish import ImagePolishInput
+
+@app.put('/v1/model-configs/{config_id}/image-polish',dependencies=[Depends(require_service_auth)])
+def bind_image_polish(config_id:UUID,configs=Depends(get_model_configs)):
+    return config_operation(lambda:configs.bind_production_model('image_polish',str(config_id)))
+
+@app.post('/v1/images/polish/jobs',status_code=202,dependencies=[Depends(require_service_auth)])
+def submit_image_polish(payload:ImagePolishInput,response:Response,idempotency_key:str=Header(min_length=1,max_length=128),
+                        jobs=Depends(get_jobs),configs=Depends(get_model_configs),media=Depends(get_media)):
+    return production_submit('image_polish',payload,idempotency_key,response,jobs,configs,media)

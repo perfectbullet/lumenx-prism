@@ -234,7 +234,7 @@ def test_worker_uses_frozen_prompt_after_compiler_changes(setup, monkeypatch):
     jobs, configs, media, request, adapter = setup
     request = ImageRequest(**(request.model_dump() | {'generation_type': 'headshot'}))
     row = jobs.submit_image(request, 'frozen-prompt', configs.resolve_image_model(), media)
-    assert row['prompt_version'] == 'asset-production-v5'
+    assert row['prompt_version'] == 'asset-production-v6'
     monkeypatch.setattr('lumenx_prism.image_jobs.compile_image_prompt', lambda _: ('different prompt', 'different negative'))
     ImageWorker(jobs, configs, media, 'worker', adapter_factory=lambda _: adapter).run_once()
     assert jobs.get(row['id'])['status'] == 'succeeded'

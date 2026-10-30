@@ -28,7 +28,7 @@ class Worker:
         self.image_worker = None
         if media is not None:
             from .production_worker import ProductionWorker
-            kinds=['storyboard_generation'] if capabilities=='text' else ['video_generation','video_assembly'] if capabilities=='gpu' else ['storyboard_generation','video_generation','video_assembly']
+            kinds=['storyboard_generation','image_polish'] if capabilities=='text' else ['video_generation','video_assembly'] if capabilities=='gpu' else ['storyboard_generation','image_polish','video_generation','video_assembly']
             self.production_worker=ProductionWorker(jobs,configs,media,self.worker_id,kinds,lease_seconds)
         if media is not None and capabilities!='text':
             from .image_jobs import ImageWorker

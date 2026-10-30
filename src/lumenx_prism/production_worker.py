@@ -36,14 +36,19 @@ class ProductionWorker:
             else:
                 config=self.configs.resolve_production_model(job['type'],job['model_config']['id'])
                 if config['revision']!=job['model_config']['revision']:raise ConfigError('model_config_changed')
-                if job['type']=='storyboard_generation':
+                if job['type'] in ('storyboard_generation','image_polish'):
                     raw=job.get('raw_model_output')
                     if raw is None:
                         save(phase='inference');adapter=self.llm_factory(config,timeout=180,max_retries=0)
                         raw=adapter.chat(messages=[{'role':'user','content':job['effective_prompt']}])
                     save(raw_model_output=raw,phase='validating')
-                    board=BoardInput.model_validate(job['request']);content=parse_board(raw,board)
-                    result={'content':content.model_dump(mode='json'),'checks':validate_board(content,board)}
+                    if job['type']=='image_polish':
+                        from .image_polish import ImagePolishInput,parse_polish
+                        polished=parse_polish(raw,ImagePolishInput.model_validate(job['request']))
+                        result={'suggestion':polished.model_dump(mode='json'),'review_required':True}
+                    else:
+                        board=BoardInput.model_validate(job['request']);content=parse_board(raw,board)
+                        result={'content':content.model_dump(mode='json'),'checks':validate_board(content,board)}
                 else:
                     if job['workflow_snapshot']!=snapshot():raise ConfigError('workflow_changed')
                     params=VideoParameters.model_validate(config['parameters']);group=params.resource_group
