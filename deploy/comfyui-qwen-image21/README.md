@@ -8,7 +8,7 @@
 
 云端原始工作流为 `/root/zealman-app/workflows/API-B18-Qwenimage2.1.json`，源码为 ComfyUI 0.39.0、revision `b0b743566f65daafc423b4fea8a2fbda94b3384a`。使用其原生 `TextEncodeQwenImage21`、`QwenImage21Cache`、`ModelAttentionBackend`、`ResolutionSelector` 等节点，无需安装额外自定义插件。原图像保存节点 `SaveImageAdvanced` 改为原生 `SaveImage`，去掉云面板 `_api_config` 元数据，初次验收使用20步、0.4MP、16:9。
 
-受控 API 工作流位于仓库 `workflows/qwen-image21-t2i.api.json`，231 副本为 `/nfs-data/comfyui-qwen-image21/workflows/qwen-image21-t2i.api.json`。
+受控 API 工作流统一位于仓库 `src/lumenx_prism/workflows/qwen-image21-v1.json`。原 `workflows/qwen-image21-t2i.api.json` 与其内容完全相同，已删除重复副本；统一目录及参数说明见 [工作流说明](../../src/lumenx_prism/workflows/README.md)。初次迁移时的 231 副本为 `/nfs-data/comfyui-qwen-image21/workflows/qwen-image21-t2i.api.json`，该路径仅保留为历史记录。
 
 依赖复用现有 `yanwk/comfyui-boot:cu130-slim-v2` 镜像及只读基础包，在独立 packages 目录覆盖 `runtime-requirements.txt` 指定版本；不构建镜像，不升级8188实例。容器以 UID/GID 1000 运行，适配 NAS root-squash。推理使用231的5090；云端无卡实例只提供文件。默认关闭自定义节点与云API节点，模型目录只读。
 
