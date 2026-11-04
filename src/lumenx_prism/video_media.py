@@ -12,29 +12,29 @@ from .model_configs import ConfigError
 
 MAX_VIDEO_BYTES=256*1024*1024
 
-def probe(path):
+def probe(path,max_duration=180):
     try:
         out=subprocess.run(['ffprobe','-v','error','-show_streams','-show_format','-of','json',str(path)],
             capture_output=True,timeout=30,check=True)
         data=json.loads(out.stdout);video=next(s for s in data['streams'] if s['codec_type']=='video')
         audio=[s for s in data['streams'] if s['codec_type']=='audio']
         duration=float(data['format']['duration'])
-        if not 0<duration<=180 or video['width']*video['height']>4096*4096: raise ValueError()
+        if not 0<duration<=max_duration or video['width']*video['height']>4096*4096: raise ValueError()
         return {'width':video['width'],'height':video['height'],'duration_seconds':duration,
                 'fps':video.get('avg_frame_rate'),'has_audio':bool(audio),'audio_channels':audio[0].get('channels') if audio else None}
     except (ValueError,KeyError,StopIteration,subprocess.SubprocessError):
         raise ConfigError('video_file_invalid',422) from None
 
 def put_video(media,content,job_id,key='video'):
-    if not content or len(content)>MAX_VIDEO_BYTES: raise ConfigError('video_size_invalid',413)
+    if not content or len(content)>(1024*1024*1024 if key=='assembly' else MAX_VIDEO_BYTES): raise ConfigError('video_size_invalid',413)
     media.root.mkdir(parents=True,exist_ok=True)
     if shutil.disk_usage(media.root).free<len(content)*2+100*1024*1024: raise ConfigError('media_disk_full',503)
     digest=hashlib.sha256(content).hexdigest();id=str(uuid5(NAMESPACE_URL,f'prism:video:{job_id}:{key}:{digest}'))
     relative=Path('outputs')/id/'video.mp4';path=media.root/relative;path.parent.mkdir(parents=True,exist_ok=True)
     temp=path.with_name(str(uuid4())+'.mp4')
     try:
-        temp.write_bytes(content);metadata=probe(temp)
-        subprocess.run(['ffmpeg','-nostdin','-v','error','-i',str(temp),'-f','null','-'],check=True,capture_output=True,timeout=180)
+        temp.write_bytes(content);metadata=probe(temp,max_duration=720 if key=='assembly' else 180)
+        subprocess.run(['ffmpeg','-nostdin','-v','error','-i',str(temp),'-f','null','-'],check=True,capture_output=True,timeout=600 if key=='assembly' else 180)
         os.replace(temp,path)
     except subprocess.SubprocessError: raise ConfigError('video_decode_failed',502) from None
     finally: temp.unlink(missing_ok=True)
@@ -44,7 +44,10 @@ def put_video(media,content,job_id,key='video'):
     return {k:v for k,v in row.items() if k not in ('_id','relative_path')}|{'download_url':f'/v1/media/{id}/download'}
 
 def assemble(media,refs,job_id):
+    if not 2<=len(refs)<=36:raise ConfigError('assembly_clip_count_invalid',422)
     media.root.mkdir(parents=True,exist_ok=True)
+    required=sum(r.get('size_bytes',MAX_VIDEO_BYTES) for r in refs)*4+512*1024*1024
+    if shutil.disk_usage(media.root).free<required:raise ConfigError('media_disk_full',503)
     with tempfile.TemporaryDirectory(prefix='assemble-',dir=media.root) as directory:
         directory=Path(directory);clips=[]
         width=height=None
@@ -65,4 +68,5 @@ def assemble(media,refs,job_id):
         final=directory/'preview.mp4'
         subprocess.run(['ffmpeg','-nostdin','-v','error','-y','-f','concat','-safe','1','-i',str(listing),
             '-c','copy','-movflags','+faststart',str(final)],check=True,capture_output=True,timeout=120)
+        if final.stat().st_size>1024*1024*1024:raise ConfigError('video_size_invalid',413)
         return put_video(media,final.read_bytes(),job_id,'assembly')

@@ -4,17 +4,17 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>图像制作台 · LumenX Prism</title>
 <link rel="stylesheet" href="/static/entities.css">
-<link rel="stylesheet" href="/static/images.css?v=20261030-polish2">
+<link rel="stylesheet" href="/static/images.css?v=20261031-history5">
 <script src="/static/request-utils.js?v=20261030-polish2" defer></script>
-<script src="/static/images.js?v=20261030-polish2" defer></script>
+<script src="/static/images.js?v=20261031-history5" defer></script>
 <link rel="stylesheet" href="/static/image-header.css?v=20261030-header1">
-</head>
+<link rel="stylesheet" href="/static/work-flow.css?v=20261102-material17"></head>
 <body><main>
-<header class="page-header"><div><div class="eyebrow">LUMENX PRISM / IMAGE LAB</div><h1>图像制作台</h1></div><nav aria-label="制作工具"><a href="/tools/entities">实体提取</a><a href="/tools/images">图像制作台</a><a href="/tools/storyboards">分镜制作台</a><a href="/tools/videos">视频制作台</a><a href="/tools/models">模型配置</a><a href="/docs" target="_blank" rel="noopener">接口文档</a></nav></header>
+<header class="page-header"><div><div class="eyebrow">LUMENX PRISM / IMAGE LAB</div><h1>图像制作台</h1></div><nav aria-label="制作工具"><a href="/tools/works">作品库</a><a href="/tools/scripts">剧本制作规划</a><a href="/tools/entities">素材提取</a><a href="/tools/images">图像制作台</a><a href="/tools/prompt-images">提示词生图</a><a href="/tools/storyboards">分镜制作台</a><a href="/tools/videos">视频制作台</a><a href="/tools/h3-ref2va-v1">h3-ref2va-v1</a><a href="/tools/merges">视频合并</a><a href="/tools/comfyui">ComfyUI 任务管理</a><a href="/tools/models">模型配置</a><a href="/docs" target="_blank" rel="noopener">接口文档</a></nav></header>
 <div class="workspace image-workspace">
 <section class="card editor-panel" aria-labelledby="editorTitle">
  <div class="section-head panel-heading"><div class="editor-heading-main"><h2 id="editorTitle"><span class="step">01</span>制作要求</h2><button id="chooseStyle" class="ghost">选择风格</button><button id="chooseCharacterSample" class="ghost">人物样本选择</button><button id="chooseSceneSample" class="ghost">场景样本选择</button><button id="choosePropSample" class="ghost">道具样本选择</button></div></div>
- <div class="panel-scroll editor-fields">
+ <div class="panel-scroll editor-fields"><div id="workSource" data-multiple="true"></div>
   <div class="sample-selection"><div><span id="selectedStyle" class="tag">风格：自定义</span><span id="selectedSubject" class="tag">样本：自定义</span></div><p id="sampleNote" class="hint">通过标题栏分别选择风格与人物、场景或道具样本。</p></div>
   <div class="fields">
    <label>资产类型<select id="assetType"><option value="character">角色</option><option value="scene">场景</option><option value="prop">道具</option><option value="image">自由图片</option></select></label>
@@ -32,7 +32,7 @@ sad
 angry</textarea></label></div>
   </details>
   <div class="reference-box"><div class="section-head"><label for="files">参考图片 <span class="hint">最多 4 张，角色首张为身份主参考</span></label><button id="clearRefs" class="ghost">清空</button></div><input id="files" type="file" multiple accept="image/png,image/jpeg,image/webp"><div id="references" class="hint">无参考图片</div></div>
-  <details class="advanced"><summary>生成设置 <span>尺寸、候选数量与种子</span></summary><div class="size-recommendation"><span id="sizeHint" class="hint"></span><button id="recommendedSize" class="ghost">采用推荐尺寸</button></div><div class="fields settings-fields"><label>宽度<input id="width" type="number" value="768" step="32" min="256" max="2048"></label><label>高度<input id="height" type="number" value="1344" step="32" min="256" max="2048"></label><label>候选数量<select id="batch"><option>1</option><option>2</option><option>3</option><option>4</option></select></label><div class="seed-field"><label for="seed">种子</label><div class="seed-control"><input id="seed" type="number" value="20261029" min="0" max="9007199254740991" step="1" inputmode="numeric" aria-describedby="seedRange"><button id="randomSeed" class="ghost" type="button">随机</button></div><p id="seedRange" class="hint">范围：0 ～ 9007199254740991（整数）</p></div></div></details>
+  <details class="advanced"><summary>生成设置 <span>尺寸、候选数量与种子</span></summary><div class="size-recommendation"><span id="sizeHint" class="hint"></span><button id="recommendedSize" class="ghost">采用推荐尺寸</button></div><div class="fields settings-fields"><label>宽度<input id="width" type="number" value="768" step="32" min="256" max="2048"></label><label>高度<input id="height" type="number" value="1344" step="32" min="256" max="2048"></label><label>候选数量<select id="batch"><option>1</option><option>2</option><option>3</option><option selected>4</option></select></label><div class="seed-field"><label for="seed">种子</label><div class="seed-control"><input id="seed" type="number" value="20261029" min="0" max="9007199254740991" step="1" inputmode="numeric" aria-describedby="seedRange"><button id="randomSeed" class="ghost" type="button">随机</button></div><p id="seedRange" class="hint">范围：0 ～ 9007199254740991（整数）</p></div></div></details>
   <details class="advanced"><summary>补充提示词 <span>创作要求与负面词</span></summary><label>创作要求<textarea id="prompt" rows="2"></textarea></label><label>负面提示词<textarea id="negative" rows="2"></textarea></label></details>
  </div>
  <div class="editor-footer"><div class="actions"><button id="preview">预览提示词</button><button id="generate" class="primary">提交生成</button></div><p id="status" role="status" aria-live="polite">就绪</p></div>
@@ -40,7 +40,7 @@ angry</textarea></label></div>
 <section class="card tasks-panel" aria-labelledby="tasksTitle">
  <div class="section-head panel-heading"><h2 id="tasksTitle"><span class="step">02</span>任务与结果</h2><div class="task-heading-actions"><button id="restoreInput" class="ghost" disabled>恢复原输入</button><button id="connect" class="ghost">刷新历史</button></div></div>
  <label class="token-control">服务访问令牌<input id="token" type="password" autocomplete="off"></label>
- <div class="history-section"><div class="history-heading"><h3>最近任务</h3><span id="connection" role="status"></span></div><p id="historyStatus" role="status" aria-live="polite">正在读取历史…</p><div id="history" class="history-list"></div></div>
+ <div class="history-section"><div class="history-heading"><h3>最近任务</h3><span id="connection" role="status"></span></div><p id="historyScope" class="hint">请选择作品和集</p><div id="historyKinds" class="history-kinds" role="group" aria-label="按资产类型筛选"><button data-kind="" aria-pressed="true">全部</button><button data-kind="character" aria-pressed="false">人物</button><button data-kind="scene" aria-pressed="false">场景</button><button data-kind="prop" aria-pressed="false">道具</button></div><label class="history-search" for="historySearch"><span class="sr-only">搜索资产名称</span><input id="historySearch" type="search" maxlength="100" placeholder="搜索人物、场景或道具名称"></label><p id="historyStatus" role="status" aria-live="polite">正在读取历史…</p><div id="history" class="history-list"></div><div class="history-pages"><button id="historyPrev" disabled>上一页</button><span id="historyPage">第 1 页</span><button id="historyNext" disabled>下一页</button></div></div>
  <div class="task-query"><label for="jobId" class="sr-only">任务编号</label><input id="jobId" placeholder="任务编号，或点击上方历史记录"><button id="lookup" class="ghost">查询</button></div>
  <div class="panel-scroll result-scroll"><p id="meta" role="status">选择历史任务查看图片，或在左侧提交新的生成任务。</p><div id="results" class="image-results"><div class="results-placeholder"><span aria-hidden="true">▧</span><p>生成结果将在这里显示</p><small>点击最近任务，可查看进度和下载原图</small></div></div><details class="raw" id="snapshot"><summary>提示词与任务快照</summary><pre id="raw">尚无任务</pre></details><p class="hint">生成结果需人工检查；正式资产选择在 LumenX 完成。</p></div>
 </section>
@@ -63,4 +63,4 @@ angry</textarea></label></div>
  <footer class="polish-footer"><button id="cancelPolish">取消</button><button id="applyPolish" class="primary">应用到表单</button></footer>
 </dialog>
 <script src="/static/image-polish.js?v=20261030-polish2" defer></script>
-</body></html>
+<script src="/static/work-flow.js?v=20261102-merge20"></script><script src="/static/work-picker.js?v=20261031-refresh12"></script></body></html>

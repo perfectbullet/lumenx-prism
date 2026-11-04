@@ -19,6 +19,7 @@ class CharacterCard(BaseModel):
 
 class ImageRequest(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    prompt_mode: Literal['asset', 'raw'] = 'asset'
     asset_type: Literal['character', 'scene', 'prop', 'image'] = 'image'
     generation_type: Literal['image', 'reference_sheet', 'full_body', 'three_view', 'headshot'] = 'image'
     name: str = Field(default='', max_length=100)
@@ -37,6 +38,11 @@ class ImageRequest(BaseModel):
 
     @model_validator(mode='after')
     def check_request(self):
+        if self.prompt_mode == 'raw':
+            if self.asset_type != 'image' or self.generation_type != 'image' or self.character_card or self.style or self.description:
+                raise ValueError('Raw prompt mode requires a plain image without asset descriptions or style templates')
+            if not self.prompt:
+                raise ValueError('Raw prompt mode requires a prompt')
         if self.width * self.height > 2097152:
             raise ValueError('At most 2 megapixels per image')
         if not (self.prompt or self.description or self.character_card):
@@ -70,5 +76,6 @@ class ImageParameters(BaseModel):
     resource_group: str = Field(min_length=1, max_length=100, pattern=r'^[a-zA-Z0-9_.:-]+$')
     peer_base_urls: list[str] = Field(default_factory=list, max_length=8)
     poll_seconds: float = Field(default=2, ge=0.05, le=30)
+    queue_retry_seconds: int = Field(default=5,ge=1,le=3600)
     timeout_seconds: int = Field(default=1200, ge=30, le=7200)
     reference_resolution: int = Field(default=768, ge=256, le=1536, multiple_of=32)

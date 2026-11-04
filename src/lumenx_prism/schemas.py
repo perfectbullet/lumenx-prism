@@ -6,7 +6,10 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
+from .works import WorkContext
+
 class EntityExtractionRequest(BaseModel):
+    work_context: WorkContext | None = None
     model_config = ConfigDict(extra='forbid')
     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80000)]
     custom_extraction_prompt: str = Field(default='', max_length=30000)

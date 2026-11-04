@@ -12,6 +12,8 @@ SKILL_REVISION = '199b7d0e1fd95e7b3eafa8c15eca692534142427'
 
 def compile_image_prompt(request: ImageRequest):
     r = request
+    if r.prompt_mode == 'raw':
+        return r.prompt, r.negative_prompt
     negative = r.negative_prompt
     parts = [f'Asset: {r.name}. {r.description}', r.prompt]
     single_instruction = None

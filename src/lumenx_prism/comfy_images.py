@@ -41,7 +41,10 @@ def build_workflow(request, prompt, negative, parameters, uploaded, job_id, inde
 class ComfyImages:
     def __init__(self, config):
         self.params = ImageParameters.model_validate(config['parameters'])
-        self.client = httpx.Client(base_url=config['base_url'].rstrip('/'), timeout=30,
+        self.http_timeout=config.get('_comfyui_runtime',{}).get('http_timeout_seconds',30)
+        self.optional_peer_base_urls=set(config.get('_optional_peer_base_urls',[]))
+        self.peer_api_keys=config.get('_comfyui_peer_auth',{})
+        self.client = httpx.Client(base_url=config['base_url'].rstrip('/'), timeout=self.http_timeout,
                                   follow_redirects=False, trust_env=False,
                                   headers={'Authorization':'Bearer '+config['api_key']} if config.get('api_key') else {})
 
@@ -73,8 +76,13 @@ class ComfyImages:
         peers=[]
         for base in self.params.peer_base_urls:
             # Peer auth is intentionally not inherited from this provider.
-            with httpx.Client(timeout=10,trust_env=False,follow_redirects=False) as client:
-                response=client.get(base.rstrip('/')+'/queue'); response.raise_for_status(); peer=response.json()
+            try:
+                with httpx.Client(timeout=getattr(self,'http_timeout',10),trust_env=False,follow_redirects=False) as client:
+                    response=client.get(base.rstrip('/')+'/queue',headers={'Authorization':'Bearer '+self.peer_api_keys[base.rstrip('/')]} if getattr(self,'peer_api_keys',{}).get(base.rstrip('/')) else {}); response.raise_for_status(); peer=response.json()
+            except httpx.ConnectError:
+                if base.rstrip('/') in getattr(self,'optional_peer_base_urls',set()):continue
+                raise ConfigError('comfy_peer_unavailable',503) from None
+            except httpx.HTTPError:raise ConfigError('comfy_peer_unavailable',503) from None
             if not isinstance(peer.get('queue_running'),list) or not isinstance(peer.get('queue_pending'),list):
                 raise ConfigError('comfy_queue_invalid')
             if peer['queue_running'] or peer['queue_pending']: return False
@@ -82,9 +90,11 @@ class ComfyImages:
         # Caller holds the physical-GPU resource slot. Idle peers must release cached models
         # before this instance loads a different model (image and H3 share one GPU).
         for base in peers:
-            with httpx.Client(timeout=30,trust_env=False,follow_redirects=False) as client:
-                response=client.post(base.rstrip('/')+'/free',json={'unload_models':True,'free_memory':True})
-                response.raise_for_status()
+            try:
+                with httpx.Client(timeout=getattr(self,'http_timeout',30),trust_env=False,follow_redirects=False) as client:
+                    response=client.post(base.rstrip('/')+'/free',headers={'Authorization':'Bearer '+self.peer_api_keys[base.rstrip('/')]} if getattr(self,'peer_api_keys',{}).get(base.rstrip('/')) else {},json={'unload_models':True,'free_memory':True})
+                    response.raise_for_status()
+            except httpx.HTTPError:raise ConfigError('comfy_peer_unavailable',503) from None
         return True
 
     def upload(self, media, snapshot):

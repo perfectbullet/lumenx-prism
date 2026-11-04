@@ -22,6 +22,7 @@ class Beat(Strict):
     handoff: str = Field(min_length=1,max_length=400)
 
 class Dialogue(Strict):
+    delivery: Literal['on_screen','off_screen','narration'] = 'on_screen'
     speaker: str = Field(min_length=1,max_length=100)
     text: str = Field(min_length=1,max_length=200)
     start: float = Field(ge=0,le=15)
@@ -61,17 +62,19 @@ class BoardInput(Strict):
     assets: list[Asset] = Field(min_length=1,max_length=20)
     style: str = Field(default='',max_length=2000)
     aspect_ratio: Literal['16:9','9:16'] = '16:9'
-    total_duration: int = Field(default=15,ge=8,le=45)
-    shot_count: int = Field(default=3,ge=2,le=6)
+    total_duration: int = Field(default=15,ge=8,le=180)
+    shot_count: int = Field(default=3,ge=2,le=36)
+    scene_context: dict | None = None
     audio: Literal['chinese_dialogue_environment_no_music'] = 'chinese_dialogue_environment_no_music'
     @model_validator(mode='after')
     def check_assets(self):
+        if self.scene_context is None and (self.total_duration>45 or self.shot_count>6): raise ValueError('短片入口最多45秒、6镜头；长剧本请使用剧本制作规划按场生成')
         if len({a.name for a in self.assets})!=len(self.assets): raise ValueError('Asset names must be unique')
         if not 4*self.shot_count<=self.total_duration<=15*self.shot_count: raise ValueError('Duration incompatible with shot count')
         return self
 
 class BoardContent(Strict):
-    shots: list[Shot] = Field(min_length=2,max_length=6)
+    shots: list[Shot] = Field(min_length=2,max_length=36)
 
 class DraftInput(Strict):
     source_job_id: UUID
@@ -88,14 +91,27 @@ class VideoInput(Strict):
 class AssemblyInput(Strict):
     draft_id: UUID
     revision: int = Field(ge=1)
-    video_job_ids: list[UUID] = Field(min_length=2,max_length=6)
+    video_job_ids: list[UUID] = Field(default_factory=list,max_length=36)
+    selection_mode: Literal['selected','latest_succeeded'] = 'selected'
+
+    @model_validator(mode='after')
+    def assembly_selection(self):
+        if self.selection_mode=='selected' and len(self.video_job_ids)<2:
+            raise ValueError('请为每个镜头选择候选，或使用全部合成')
+        if self.selection_mode=='latest_succeeded' and self.video_job_ids:
+            raise ValueError('自动选择模式不能同时指定候选')
+        if len(set(self.video_job_ids))!=len(self.video_job_ids):
+            raise ValueError('合成候选不能重复')
+        return self
 
 class VideoParameters(Strict):
     workflow: Literal['h3-ref2va-v1'] = 'h3-ref2va-v1'
     resource_group: str = Field(min_length=1,max_length=100,pattern=r'^[a-zA-Z0-9_.:-]+$')
     steps: int = Field(default=20,ge=1,le=50)
-    output_megapixels: float = Field(default=0.4,ge=0.2,le=1)
+    output_megapixels: float = Field(default=1.8,ge=0.2,le=2)
     poll_seconds: float = Field(default=2,ge=.05,le=30)
-    timeout_seconds: int = Field(default=1800,ge=30,le=7200)
+    timeout_seconds: int = Field(default=10800,ge=30,le=10800)
     peer_base_urls: list[str] = Field(default_factory=list,max_length=8)
+    memory_check_seconds: int = Field(default=30,ge=1,le=3600)
+    queue_retry_seconds: int = Field(default=5,ge=1,le=3600)
     min_free_vram_mb: int = Field(default=24000,ge=0,le=200000)

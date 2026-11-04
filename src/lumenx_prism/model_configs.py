@@ -2,14 +2,14 @@
 from datetime import datetime, timezone
 import json
 from typing import Literal
-from uuid import uuid4
+from uuid import UUID,uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, AnyHttpUrl, model_validator
 
 
 class ConfigError(RuntimeError):
-    def __init__(self, code, status=503):
-        self.code, self.status = code, status
+    def __init__(self, code, status=503, details=None):
+        self.code, self.status, self.details = code, status, details
         super().__init__(code)
 
 
@@ -20,7 +20,8 @@ class ModelConfigInput(BaseModel):
     provider: str = Field(min_length=1, max_length=80)
     protocol: Literal['openai_chat', 'openai_audio', 'openai_images', 'custom_http']
     model: str = Field(min_length=1, max_length=200)
-    base_url: AnyHttpUrl
+    base_url: AnyHttpUrl | None=None
+    comfyui_api_config_id: UUID | None=None
     api_key: SecretStr | None = None
     enabled: bool = True
     capabilities: list[str] = Field(default_factory=list, max_length=30)
@@ -30,7 +31,9 @@ class ModelConfigInput(BaseModel):
 
     @model_validator(mode='after')
     def valid_options(self):
-        if self.base_url.username or self.base_url.password or self.base_url.query or self.base_url.fragment:
+        if self.comfyui_api_config_id and not (self.provider=='comfyui' and self.protocol=='custom_http' and self.kind in ('image','video')):raise ValueError('ComfyUI 实例引用仅用于 ComfyUI 图片或视频模型')
+        if not self.base_url and not (self.provider=='comfyui' and self.comfyui_api_config_id):raise ValueError('需要服务地址或 ComfyUI 实例引用')
+        if self.base_url and (self.base_url.username or self.base_url.password or self.base_url.query or self.base_url.fragment):
             raise ValueError('Base URL must not contain credentials, query or fragment')
         if len(json.dumps(self.parameters, allow_nan=False)) > 16000:
             raise ValueError('Parameters exceed 16000 characters')
@@ -40,10 +43,14 @@ class ModelConfigInput(BaseModel):
             ChatParameters.model_validate(self.parameters)
         if self.kind == 'image' and self.provider == 'comfyui':
             from .image_schemas import ImageParameters
-            ImageParameters.model_validate(self.parameters)
+            parameters=dict(self.parameters)
+            if self.comfyui_api_config_id:parameters.setdefault('resource_group','instance-reference')
+            ImageParameters.model_validate(parameters)
         if self.kind == 'video' and self.provider == 'comfyui':
             from .production_schemas import VideoParameters
-            VideoParameters.model_validate(self.parameters)
+            parameters=dict(self.parameters)
+            if self.comfyui_api_config_id:parameters.setdefault('resource_group','instance-reference')
+            VideoParameters.model_validate(parameters)
         return self
 
 
@@ -77,7 +84,10 @@ class ModelConfigs:
 
     @staticmethod
     def snapshot(row):
-        return {k: row[k] for k in ('name', 'kind', 'provider', 'protocol', 'model', 'revision', 'parameters')} | {'id': row['_id']}
+        value={k: row[k] for k in ('name', 'kind', 'provider', 'protocol', 'model', 'revision', 'parameters')} | {'id': row['_id']}
+        if row.get('comfyui_api_config_id'):value['comfyui_api_config_id']=str(row['comfyui_api_config_id'])
+        if row.get('_comfyui_runtime'):value['comfyui_runtime']=row['_comfyui_runtime']
+        return value
 
     def list(self, limit=50, offset=0):
         rows = list(self.collection.find({'record_type': 'model'}).sort(
@@ -99,7 +109,12 @@ class ModelConfigs:
 
     def save(self, payload, config_id=None):
         data = payload.model_dump(mode='json', exclude={'api_key', 'revision'})
-        data['base_url'] = data['base_url'].rstrip('/')
+        data['base_url'] = data['base_url'].rstrip('/') if data['base_url'] else None
+        if config_id and 'comfyui_api_config_id' not in payload.model_fields_set:
+            data['comfyui_api_config_id']=self.get(config_id).get('comfyui_api_config_id')
+        if payload.comfyui_api_config_id:
+            from .comfy_api_configs import ComfyApiConfigs
+            ComfyApiConfigs(self.collection.database).get(str(payload.comfyui_api_config_id),require_enabled=True)
         now = datetime.now(timezone.utc)
         key = payload.api_key.get_secret_value() if payload.api_key else ''
         if config_id:
@@ -152,8 +167,8 @@ class ModelConfigs:
         return row
 
 
-    @staticmethod
-    def validate_image_model(row):
+    def validate_image_model(self,row):
+        row=self.runtime_config(row)
         from .image_schemas import ImageParameters
         from urllib.parse import urlsplit
         if not row.get('enabled'):
@@ -169,6 +184,28 @@ class ModelConfigs:
             if parts.scheme not in ('http','https') or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment:
                 raise ConfigError('image_peer_url_invalid',422)
 
+    def runtime_config(self,row):
+        """Retired image peers may be offline, but live/unknown peers remain mandatory."""
+        from copy import deepcopy
+        runtime=deepcopy(row);optional=[]
+        if row.get('comfyui_api_config_id'):
+            from .comfy_api_configs import ComfyApiConfigs
+            services=ComfyApiConfigs(self.collection.database);server=services.get(row['comfyui_api_config_id'],require_enabled=True)
+            connection=services.connection(server);runtime.update({k:v for k,v in connection.items() if k!='parameters'})
+            runtime['parameters']={**row.get('parameters',{}),**connection['parameters']}
+            if row['kind']=='video':runtime['parameters'].update(min_free_vram_mb=server['min_free_vram_mb'],memory_check_seconds=server['memory_check_seconds'])
+            return runtime
+        binding=(self.collection.find_one({'_id':'bindings'}) or {}).get('image_generation_id')
+        for url in row.get('parameters',{}).get('peer_base_urls',[]):
+            peers=list(self.collection.find({'record_type':'model','kind':'image','provider':'comfyui',
+                'base_url':url.rstrip('/')},{'_id':1}))
+            ids=[p['_id'] for p in peers]
+            if not binding or not ids or binding in ids:continue
+            active=self.collection.database.ai_jobs.find_one({'type':'image_generation','status':{'$in':['queued','running']},'model_config.id':{'$in':ids}})
+            if not active:optional.append(url.rstrip('/'))
+        runtime['_optional_peer_base_urls']=optional
+        return runtime
+
     def bind_image_model(self,config_id):
         self.validate_image_model(self.get(config_id))
         self.collection.update_one({'_id':'bindings'},{'$set':{'record_type':'bindings',
@@ -179,13 +216,14 @@ class ModelConfigs:
         if not config_id:
             config_id=(self.collection.find_one({'_id':'bindings'}) or {}).get('image_generation_id')
         if not config_id:raise ConfigError('image_model_not_configured',503)
-        row=self.get(str(config_id));self.validate_image_model(row);return row
+        row=self.runtime_config(self.get(str(config_id)));self.validate_image_model(row);return row
 
     def resolve_production_model(self,kind,config_id=None):
         if kind not in ('storyboard_generation','video_generation','image_polish'):raise ConfigError('model_usage_invalid',422)
         if not config_id:config_id=(self.collection.find_one({'_id':'bindings'}) or {}).get(kind+'_id')
         if not config_id:raise ConfigError(kind+'_model_not_configured')
         row=self.get(str(config_id))
+        if kind=='video_generation':row=self.runtime_config(row)
         if kind in ('storyboard_generation','image_polish'):self.validate_entity_model(row)
         else:
             from .production_schemas import VideoParameters

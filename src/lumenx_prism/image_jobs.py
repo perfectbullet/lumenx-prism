@@ -25,7 +25,11 @@ class ImageJobs(Jobs):
 
     @staticmethod
     def fingerprint(request):
-        value={'type':'image_generation','request':request.model_dump(mode='json')}
+        body=request.model_dump(mode='json')
+        # Preserve fingerprints for existing callers before prompt_mode was added.
+        if body.get('prompt_mode') == 'asset':
+            body.pop('prompt_mode',None)
+        value={'type':'image_generation','request':body}
         return hashlib.sha256(json.dumps(value,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
 
     def submit_image(self, request, key, config, media):
@@ -38,8 +42,9 @@ class ImageJobs(Jobs):
                  created_at=utcnow(),started_at=None,finished_at=None,duration_ms=None,
                  request=request.model_dump(mode='json'),request_hash=self.fingerprint(request),idempotency_key=key,
                  effective_prompt=prompt,negative_prompt=negative,prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest(),
-                 prompt_version=PROMPT_VERSION,skill_revision=SKILL_REVISION,reference_snapshot=refs,
-                 style_snapshot=adapt_visual_style(request.style, request.asset_type),
+                 prompt_version='raw-prompt-v1' if request.prompt_mode=='raw' else PROMPT_VERSION,
+                 skill_revision=None if request.prompt_mode=='raw' else SKILL_REVISION,reference_snapshot=refs,
+                 style_snapshot={'mode':'raw','effective_style':''} if request.prompt_mode=='raw' else adapt_visual_style(request.style, request.asset_type),
                  workflow_snapshot=workflow_snapshot(),model_config=ModelConfigs.snapshot(config),
                  provider=config['provider'],requested_model=config['model'],result=None,error_code=None,
                  executions=[],attempt=0,worker_id=None,lease_until=None)
@@ -48,8 +53,12 @@ class ImageJobs(Jobs):
         return self.public(row)
 
     def claim_image(self,worker_id,lease_seconds):
+        from .comfy_control import GPUControl
+        if GPUControl(self.collection.database).paused():return None
         now=utcnow()
-        row=self.collection.find_one_and_update({'type':'image_generation','$or':[
+        from .gpu_scheduling import eligible_heads
+        heads=eligible_heads(self.collection.database,now)
+        row=self.collection.find_one_and_update({'_id':{'$in':heads},'type':'image_generation','scheduling_paused':{'$ne':True},'$or':[
             {'status':'queued','$or':[{'not_before':{'$exists':False}},{'not_before':{'$lte':now}}]},
             {'status':'running','lease_until':{'$lte':now}}]},
             {'$set':{'status':'running','worker_id':worker_id,'claim_token':str(uuid4()),
@@ -65,6 +74,8 @@ class ImageJobs(Jobs):
         job.update(values)
 
     def acquire(self,job,group):
+        from .comfy_control import GPUControl
+        if GPUControl(self.collection.database).paused():return False
         resources=self.collection.database['ai_resources']
         try:
             resources.update_one({'_id':group,'job_id':job['_id']},
@@ -75,9 +86,12 @@ class ImageJobs(Jobs):
     def release(self,job,group):
         self.collection.database['ai_resources'].delete_one({'_id':group,'job_id':job['_id']})
 
-    def defer(self,job):
-        self.update_owned(job,status='queued',phase='waiting_for_resource',lease_until=None,
-                          not_before=utcnow()+timedelta(seconds=5))
+    def defer(self,job,reason='resource_busy',retry_seconds=5,memory=None):
+        now=utcnow();next_check=now+timedelta(seconds=retry_seconds)
+        values={'status':'queued','phase':'waiting_for_memory' if reason=='insufficient_vram' else 'waiting_for_resource',
+            'waiting_reason':reason,'lease_until':None,'not_before':next_check}
+        if memory:values['memory_wait']={**memory,'checked_at':now,'next_check_at':next_check,'check_interval_seconds':retry_seconds}
+        self.update_owned(job,**values)
 
 
 class ImageWorker:
@@ -102,19 +116,19 @@ class ImageWorker:
             if lost.is_set():raise ConfigError('job_ownership_lost')
             self.jobs.update_owned(job,**values)
         try:
-            config=self.configs.get(job['model_config']['id'])
+            config=self.configs.runtime_config(self.configs.get(job['model_config']['id']))
             self.configs.validate_image_model(config)
             if config['revision']!=job['model_config']['revision']:raise ConfigError('model_config_changed')
             if job['workflow_snapshot']!=workflow_snapshot():raise ConfigError('workflow_changed')
             params=ImageParameters.model_validate(config['parameters']);group=params.resource_group
             if not self.jobs.acquire(job,group):
-                self.jobs.defer(job);deferred=True;return True
+                self.jobs.defer(job,retry_seconds=params.queue_retry_seconds);deferred=True;return True
             release=not any(e.get('state') in ('submitting','submitted') for e in job['executions'])
             adapter=self.adapter_factory(config)
             if not job['executions']:
                 adapter.preflight(bool(job['reference_snapshot']))
                 if not adapter.idle():
-                    self.jobs.defer(job);deferred=True;return True
+                    self.jobs.defer(job,retry_seconds=params.queue_retry_seconds);deferred=True;return True
             artifacts=[]
             for index in range(job['request']['batch_size']):
                 if index < len(job['executions']):
@@ -142,6 +156,12 @@ class ImageWorker:
                 while time.monotonic()<deadline:
                     if lost.is_set():raise ConfigError('job_ownership_lost')
                     row=adapter.history(execution['prompt_id'])
+                    from .execution_timing import from_history,aggregate
+                    timing=from_history(row)
+                    if timing:
+                        execution['timing']=timing
+                        parts=[{'prompt_id':e['prompt_id'],**e['timing']} for e in job['executions'] if e.get('timing')]
+                        save(executions=job['executions'],execution_timing=aggregate(parts,job['request']['batch_size']))
                     if row and row.get('status',{}).get('status_str')=='error':
                         release=True;raise ConfigError('comfy_execution_failed',502)
                     if row and row.get('status',{}).get('completed'):

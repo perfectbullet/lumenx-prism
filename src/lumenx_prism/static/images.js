@@ -34,7 +34,7 @@ function lock(value){busy=value;$('restoreInput').disabled=value||!currentJob;fo
 async function show(row){
  currentJob=row.type==='image_generation'?row:null;$('restoreInput').disabled=busy||!currentJob?.request;
  $('jobId').value=row.id;
- for(const item of $('history').children)item.setAttribute('aria-current',String(item.dataset.jobId===row.id));$('meta').textContent=`${row.status} / ${row.phase} · ${row.duration_ms===null?'':(row.duration_ms/1000)+' 秒'} ${row.error_code||''}`;
+ for(const item of $('history').children)item.setAttribute('aria-current',String(item.dataset.jobId===row.id));$('meta').textContent=`${row.scheduling_paused?'已暂缓 / ':''}${row.status} / ${row.phase} · ${row.duration_ms===null?'':(row.duration_ms/1000)+' 秒'} ${row.error_code||''}`;
  $('raw').textContent=JSON.stringify(row,null,2);
  if(row.status==='succeeded'||row.status==='failed')await loadImageHistory();
  if(row.status==='queued'||row.status==='running'){timer=setTimeout(()=>lookup(row.id),2000);return;}
@@ -63,28 +63,33 @@ async function lookup(id=$('jobId').value.trim()){
  clearTimeout(timer);if(!id)return;
  try{const changed=id!==$('jobId').value;const row=await(await api('/v1/jobs/'+encodeURIComponent(id))).json();await show(row);if(changed){$('snapshot').open=false;document.querySelector('.result-scroll').scrollTop=0;}}catch(e){$('meta').textContent=e.message;}
 }
+let historyOffset=0,historyKind='',historyScopeKey='',historySearchTimer;
 async function loadImageHistory(){
- const sequence=++historySequence;
- $('connect').disabled=true;$('connection').textContent='正在读取历史…';$('historyStatus').textContent='正在读取历史…';
+ const sequence=++historySequence,scope=window.PrismSelectedWork;
+ $('historyPrev').disabled=true;$('historyNext').disabled=true;
+ if(!scope){$('connect').disabled=false;$('historyPage').textContent='第 1 页';for(const b of $('historyKinds').children)b.textContent=({character:'人物',scene:'场景',prop:'道具'}[b.dataset.kind]||'全部')+'（0）';$('history').replaceChildren();$('historyScope').textContent='请选择作品和集';$('historyStatus').textContent='选择后显示该作品与所选集的图片任务。';$('connection').textContent='';return;}
+ const scopeKey=JSON.stringify(scope);if(scopeKey!==historyScopeKey){historyScopeKey=scopeKey;historyOffset=0;}
+ const picker=document.getElementById('workSource');const title=picker.querySelector('[aria-label="选择作品"]')?.selectedOptions[0]?.text||'当前作品';
+ $('historyScope').textContent=title+' · '+scope.episodes.map(e=>'第 '+Number(e.slice(1))+' 集').join('、');
+ $('connect').disabled=true;$('connection').textContent='正在读取历史…';
  try{
-  const data=await(await api('/v1/jobs?limit=30&type=image_generation')).json();
-  if(sequence!==historySequence)return;
+  const query=new URLSearchParams({limit:30,offset:historyOffset,type:'image_generation',work_id:scope.work,edition_id:scope.edition,episode_ids:scope.episodes.join(','),name_query:$('historySearch').value.trim()});if(historyKind)query.set('asset_type',historyKind);
+  const data=await(await api('/v1/jobs?'+query)).json();if(sequence!==historySequence||JSON.stringify(window.PrismSelectedWork)!==scopeKey)return;
   savedToken($('token').value.trim());$('history').replaceChildren();
-  const rows=data.items.filter(x=>x.type==='image_generation');
-  const states={queued:'排队中',running:'处理中',succeeded:'成功',failed:'失败'};
-  for(const row of rows){
-   const b=document.createElement('button');b.className='history-row';b.dataset.jobId=row.id;b.setAttribute('aria-current',String($('jobId').value===row.id));
-   const date=row.created_at?new Date(row.created_at).toLocaleString('zh-CN',{hour12:false}):'';
-   b.textContent=`${row.id.slice(0,8)} · ${states[row.status]||row.status} · ${date}`;
-   b.onclick=()=>lookup(row.id);$('history').append(b);
+  const states={queued:'排队中',running:'处理中',succeeded:'成功',failed:'失败'},kinds={character:'人物',scene:'场景',prop:'道具',image:'图片'},types={full_body:'主体全身图',headshot:'头像',three_view:'三视图',reference_sheet:'完整角色参考卡',image:'单张图片'};
+  for(const b of $('historyKinds').children){const kind=b.dataset.kind;b.textContent=({character:'人物',scene:'场景',prop:'道具'}[kind]||'全部')+'（'+(data.asset_counts?.[kind||'all']||0)+'）';b.setAttribute('aria-pressed',String(kind===historyKind));}
+  for(const row of data.items){const b=document.createElement('button');b.className='history-row';b.dataset.jobId=row.id;b.setAttribute('aria-current',String($('jobId').value===row.id));b.title='任务编号：'+row.id;
+   const name=document.createElement('strong');name.textContent=(row.display_title||'未命名图片')+' · '+(types[row.generation_type]||kinds[row.asset_type]||'图片');
+   const detail=document.createElement('small');detail.textContent=(row.scheduling_paused?'已暂缓':states[row.status]||row.status)+' · '+new Date(row.created_at).toLocaleString('zh-CN',{hour12:false});
+   b.append(name,detail);b.onclick=()=>lookup(row.id);$('history').append(b);
   }
-  $('connection').textContent='已连接';
-  $('historyStatus').textContent=rows.length?`最近 ${rows.length} 条图片任务，点击查看结果。`:'暂无图片任务。提交生成后可在这里查看。';
- }catch(e){
-  if(sequence!==historySequence)return;
-  $('connection').textContent=e.message;$('historyStatus').textContent='历史加载失败：'+e.message;
- }finally{if(sequence===historySequence)$('connect').disabled=false;}
+  $('connection').textContent='已连接';$('historyStatus').textContent=data.total?`共 ${data.total} 条匹配任务，点击查看结果。`:'当前作品与所选集暂无匹配的图片任务。';$('historyPage').textContent='第 '+(historyOffset/30+1)+' 页';$('historyPrev').disabled=historyOffset===0;$('historyNext').disabled=!data.has_more;
+ }catch(e){if(sequence===historySequence){$('connection').textContent=e.message;$('historyStatus').textContent='历史加载失败：'+e.message;}}
+ finally{if(sequence===historySequence)$('connect').disabled=false;}
 }
+for(const b of $('historyKinds').children)b.onclick=()=>{historyKind=b.dataset.kind;historyOffset=0;loadImageHistory();};
+$('historySearch').oninput=()=>{clearTimeout(historySearchTimer);historyOffset=0;historySearchTimer=setTimeout(loadImageHistory,250);};
+$('historyPrev').onclick=()=>{historyOffset=Math.max(0,historyOffset-30);loadImageHistory();};$('historyNext').onclick=()=>{historyOffset+=30;loadImageHistory();};
 
 $('generate').onclick=async()=>{
  if(busy)return;lock(true);$('status').textContent='上传参考图片并提交任务…';
@@ -273,3 +278,5 @@ $('viewerZoom').onclick=()=>{
  const original=$('viewerStage').classList.toggle('original-size');
  $('viewerZoom').textContent=original?'适应窗口':'100% 原始尺寸';$('viewerStage').scrollTop=0;$('viewerStage').scrollLeft=0;
 };
+
+{const id=new URLSearchParams(location.search).get('job');if(id)lookup(id);}

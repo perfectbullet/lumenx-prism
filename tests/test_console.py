@@ -18,7 +18,7 @@ def test_console_assets_and_safe_metadata(monkeypatch):
         for path in ['/', '/tools/entities']:
             response = client.get(path)
             assert response.status_code == 200
-            assert '剧本实体提取' in response.text
+            assert '剧本素材提取' in response.text
             assert 'test-token' not in response.text
         assert client.get('/tools/models').status_code == 200
         for asset in ['entities.js', 'entities.css', 'sample.json', 'models.html', 'models.js', 'models.css']:

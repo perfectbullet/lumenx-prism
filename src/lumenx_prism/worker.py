@@ -24,11 +24,12 @@ class Worker:
         self.lease_seconds = lease_seconds
         self.worker_id = f'{socket.gethostname()}:{os.getpid()}:{uuid4()}'
         self.capabilities=capabilities
+        self.media=media
         self.production_worker=None
         self.image_worker = None
         if media is not None:
             from .production_worker import ProductionWorker
-            kinds=['storyboard_generation','image_polish'] if capabilities=='text' else ['video_generation','video_assembly'] if capabilities=='gpu' else ['storyboard_generation','image_polish','video_generation','video_assembly']
+            kinds=['storyboard_generation','image_polish','script_planning','work_breakdown','work_entities','video_assembly'] if capabilities=='text' else ['video_generation'] if capabilities=='gpu' else ['storyboard_generation','image_polish','script_planning','work_breakdown','work_entities','video_generation','video_assembly']
             self.production_worker=ProductionWorker(jobs,configs,media,self.worker_id,kinds,lease_seconds)
         if media is not None and capabilities!='text':
             from .image_jobs import ImageWorker
@@ -37,6 +38,9 @@ class Worker:
     def run_once(self):
         self.jobs.recover_expired()
         self.jobs.mirror_attempts()
+        if self.media is not None and self.capabilities!='gpu':
+            from .work_assets import advance_batches
+            advance_batches(self.jobs.collection.database,self.configs,self.media)
         job = self.jobs.claim(self.worker_id, self.lease_seconds) if self.capabilities!='gpu' else None
         if not job:
             if self.production_worker and self.production_worker.run_once():return True

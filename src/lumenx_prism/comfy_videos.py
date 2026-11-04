@@ -13,7 +13,20 @@ WORKFLOW=Path(__file__).parent/'workflows/h3-ref2va-v1.json'
 def template(): return json.loads(WORKFLOW.read_text())
 def snapshot(): return {'version':'h3-ref2va-v1','sha256':hashlib.sha256(WORKFLOW.read_bytes()).hexdigest()}
 def build(request,prompt,params,uploaded,job_id):
-    graph=template();shot=request['shot'];board=request['board']
+    graph=template()
+    if request.get('prompt_mode')=='raw':
+        from .h3_requests import H3ReferenceInput,ASPECTS
+        raw=H3ReferenceInput.model_validate(request)
+        graph['129']['inputs']['noise_seed']=raw.seed
+        graph['124']['inputs']['steps']=raw.steps
+        graph['92']['inputs']['filename_prefix']='prism/'+job_id+'/video'
+        items=[{'id':f'ref{i}','kind':'image','source':'upload','scope':'all','track':'visual',
+                'name':f,'file':f,'start':0,'duration':raw.duration_seconds,'prompt':''} for i,f in enumerate(uploaded)]
+        graph['136']['inputs'].update(duration_seconds=raw.duration_seconds,aspect_ratio=ASPECTS[raw.aspect_ratio],
+            ref_image_size=raw.ref_image_size,output_megapixels=raw.output_megapixels,global_prompt=prompt,
+            timeline_data=json.dumps({'version':5,'globalPrompt':'','allReferencePrompt':'','gridImage':None,'items':items}))
+        return graph
+    shot=request['shot'];board=request['board']
     graph['129']['inputs']['noise_seed']=request['seed']
     graph['124']['inputs']['steps']=params.steps
     graph['92']['inputs']['filename_prefix']='prism/'+job_id+'/video'
@@ -27,7 +40,9 @@ def build(request,prompt,params,uploaded,job_id):
 class ComfyVideos(ComfyImages):
     def __init__(self,config):
         self.params=VideoParameters.model_validate(config['parameters'])
-        self.client=httpx.Client(base_url=config['base_url'].rstrip('/'),timeout=60,trust_env=False,follow_redirects=False,
+        self.optional_peer_base_urls=set(config.get('_optional_peer_base_urls',[]))
+        self.peer_api_keys=config.get('_comfyui_peer_auth',{})
+        self.client=httpx.Client(base_url=config['base_url'].rstrip('/'),timeout=config.get('_comfyui_runtime',{}).get('http_timeout_seconds',60),trust_env=False,follow_redirects=False,
             headers={'Authorization':'Bearer '+config['api_key']} if config.get('api_key') else {})
     def preflight(self,has_references=True):
         info=self.json('GET','/object_info');graph=template()
@@ -40,14 +55,14 @@ class ComfyVideos(ComfyImages):
         if not super().idle():return False
         response=self.client.post('/free',json={'unload_models':True,'free_memory':True})
         response.raise_for_status()
-        # /free schedules unloading on the peer's queue thread; wait for GPU-wide
-        # memory to actually become available rather than treating HTTP 200 as completion.
-        deadline=time.monotonic()+45
-        while time.monotonic()<deadline:
-            devices=self.json('GET','/system_stats').get('devices',[])
-            gpu=[d for d in devices if d.get('type')=='cuda']
-            if gpu and gpu[0].get('vram_free',0)>=self.params.min_free_vram_mb*1024*1024:return True
-            time.sleep(1)
+        # Unloading is asynchronous; if memory is not available yet, persist a delayed
+        # queue check rather than occupying the worker or failing the task.
+        required=self.params.min_free_vram_mb*1024*1024
+        devices=self.json('GET','/system_stats').get('devices',[])
+        gpu=[d for d in devices if d.get('type')=='cuda']
+        available=gpu[0].get('vram_free') if gpu else None
+        self.memory_status={'required_bytes':required,'available_bytes':available}
+        if isinstance(available,(int,float)) and available>=required:return True
         raise ConfigError('video_gpu_memory_not_released',503)
 
     def download(self,descriptor):

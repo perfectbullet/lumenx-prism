@@ -174,3 +174,50 @@ def test_video_unload_accepts_empty_comfy_response():
     try:assert adapter.idle()
     finally:adapter.close()
     assert calls==[('GET','/queue'),('POST','/free'),('GET','/system_stats')]
+
+
+def test_phone_offscreen_dialogue_needs_source_identity_not_visual_asset(setup):
+ request=setup[4].model_copy(update={'script':'小林听电话。\n小雨（电话画外音）：\n你好。'})
+ data=setup[5].model_dump();data['shots'][0]['dialogue'][0]['speaker']='小雨（电话画外音）'
+ result=parse_board(json.dumps(data),request);line=result.shots[0].dialogue[0]
+ assert line.speaker=='小雨' and line.delivery=='off_screen'
+ prompt=compile_video(request,result.shots[0])
+ assert 'all visible listeners keep mouths closed' in prompt
+ assert 'synchronize this visible speaker mouth' not in prompt
+ assert '小雨' not in result.shots[0].asset_names
+ data['shots'][0]['dialogue'][0]['speaker']='陌生人（电话画外音）'
+ with pytest.raises(ConfigError,match='speaker_invalid'):parse_board(json.dumps(data),request)
+
+def test_visible_dialogue_still_requires_reference_and_narration_is_explicit(setup):
+ request=setup[4].model_copy(update={'script':'小林听电话。\n小雨：你好。\n旁白：夜深了。'})
+ data=setup[5].model_dump();data['shots'][0]['dialogue'][0]['speaker']='小雨'
+ with pytest.raises(ConfigError,match='speaker_invalid'):parse_board(json.dumps(data),request)
+ data['shots'][0]['dialogue'][0].update(speaker='旁白',delivery='narration')
+ result=parse_board(json.dumps(data),request)
+ assert result.shots[0].dialogue[0].delivery=='narration'
+
+
+def test_scene_rhythm_is_reviewable_without_relabeling_model_output(setup):
+ from lumenx_prism.storyboards import validate_board
+ request=setup[4].model_copy(update={'scene_context':{'scene_id':'C03'}})
+ data=setup[5].model_dump();data['shots'][-1]['hook']='callback'
+ result=parse_board(json.dumps(data),request);checks=validate_board(result,request)
+ assert result.shots[-1].hook=='callback'
+ assert checks['structural_checks']=='passed' and checks['editorial_checks']=='needs_review'
+ assert checks['warnings'][0]['shot_ids']==['S02']
+ with pytest.raises(ConfigError,match='hook_invalid'):parse_board(json.dumps(data),setup[4])
+
+def test_scene_wait_and_relief_keep_density_findings_but_structural_errors_fail(setup):
+ from lumenx_prism.storyboards import validate_board
+ request=setup[4].model_copy(update={'scene_context':{'scene_id':'C02'},'total_duration':15,'shot_count':3})
+ data=setup[5].model_dump();import copy
+ data['shots'].append(copy.deepcopy(data['shots'][-1]));data['shots'][-1]['id']='S03'
+ for shot,hook in zip(data['shots'],['suspense','expression-beat','tender']):shot['hook']=hook
+ result=parse_board(json.dumps(data),request);checks=validate_board(result,request)
+ assert checks['warnings'][0]['code']=='storyboard_hook_density_invalid'
+ assert checks['warnings'][0]['shot_ids']==['S01','S02','S03']
+ assert [s.hook for s in result.shots]==['suspense','expression-beat','tender']
+ standalone=request.model_copy(update={'scene_context':None})
+ with pytest.raises(ConfigError,match='hook_density_invalid'):parse_board(json.dumps(data),standalone)
+ data['shots'][0]['asset_names']=['不存在的人物']
+ with pytest.raises(ConfigError,match='asset_binding_invalid'):parse_board(json.dumps(data),request)
