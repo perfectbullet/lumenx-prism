@@ -324,3 +324,41 @@ cd /data/aigc/lumenx-prism
 ## 图像描述润色（2026-10-30）
 
 图像制作台的润色按钮已启用：综合当前描述和角色细节，异步生成可确认的建议，应用前展示前后对比及冲突。角色提示词 v6 明确当前细节覆盖旧描述的冲突值，历史任务不变。模型页新增“用于图像描述润色”绑定。详见 [图像描述润色](docs/image-polish.md)。
+
+
+## 剧本制作规划与按场分镜（2026-10-30）
+
+新增 `/tools/scripts`：从完整剧本识别集、场次、目标时长，提供内容估时与可修改的制作时长/镜头建议。保存确认版本后逐场进入分镜制作台，冻结原文行号、整集上下文与参考素材，失败只重做该场。复用 MongoDB 分镜文本模型绑定；不自动生成图片或视频。详见 [剧本制作规划](docs/script-planning.md)。
+
+## GPU 交接与 ComfyUI 管理
+
+`/tools/comfyui` 可暂停/恢复GPU队列、暂缓单个排队任务、查看ComfyUI队列与显存、释放空闲模型缓存。让出显卡时先暂停并等在途任务完成，缓存释放不自动恢复任务；文本任务继续。详见 [ComfyUI 管理](docs/comfyui-control.md)。
+
+## 作品库与按集制作
+
+`/tools/works` 导入小说、剧本或故事，AI 建议分集、简报和画风，确认后按集进入制作规划或实体提取。原文与确认版本保留历史。详见 [作品库与分集确认](docs/work-library.md)。视频制作台新增自动选择每镜头最新成功候选的“全部合成”，当前分镜最多36镜，保留手动候选合成。
+
+作品级多集实体联合提取、身份/服装版本复用和“只补缺失＋自动润色＋四张暂选”批次已接入，详见 [作品级制作](docs/work-production.md)。分镜与视频页可按作品、分集版本、集筛选。
+
+## ComfyUI 工作流统一目录
+
+图片和视频的 ComfyUI API 格式 JSON 模板统一维护在 [`src/lumenx_prism/workflows/`](src/lumenx_prism/workflows/README.md)。
+
+- `qwen-image21-v1.json`：Qwen-Image 2.1 图片生成。
+- `h3-ref2va-v1.json`：H3 Ref2VA 参考图生成带音频视频。
+
+旧根目录 `workflows/qwen-image21-t2i.api.json` 是图片模板的相同副本，已去重，不再单独维护。运行时模板名称、内容及版本标识保持不变；当前 JSON 均为 API 节点图，不是包含画布坐标的编辑器导出格式。
+
+## 独立提示词生图
+
+后端调用文档（供其他 Agent 集成）：[提示词生图 API 调用指南](docs/prompt-images-api.md)。
+
+打开 `/tools/prompt-images`：无需选择作品、分集或资产，填写正负提示词即可提交图片任务。支持尺寸、1～4张候选（默认4张）、安全整数种子及随机按钮、独立历史分页与状态筛选、恢复原输入、点击原图及下载。该页使用当前 MongoDB 默认图片模型，仍共享已有 GPU 队列与暂停控制，不自动更新作品资产。
+
+请求复用 `POST /v1/images/generate/jobs`，新增可选 `prompt_mode`：默认 `asset` 保持原模板；`raw` 直接使用经字段首尾空白规范化后的提示词，不追加角色、道具、默认风格或负面词，不调用润色模型。raw 要求 asset_type=image、generation_type=image，不能同时设置角色卡、description 或 style。`GET /v1/jobs?type=image_generation&prompt_mode=raw` 仅查询该模式，`prompt_mode=asset` 包含旧资产任务；不传时保留原列表行为。原资产模式的提交指纹保持兼容。
+
+原始提示词任务记录仍存入 `ai_jobs`，保存输入、提示词版本 `raw-prompt-v1`、模型与工作流快照及候选结果。页面超时重试相同输入复用 Idempotency-Key；成功提交后再次生成使用新标识。查看历史与恢复输入不会调用生成。sessionStorage 仅记录最近任务编号和未确认提交的指纹／标识，不保存提示词正文或模型密钥。
+
+### 独立 H3 参考图视频
+
+`/tools/h3-ref2va-v1`：直接提交提示词与 1～9 张参考图生成视频，任务与历史独立于作品制作流程，复用持久化 GPU 队列。参数、接口和存储说明见 [h3-ref2va-v1](docs/h3-ref2va-v1.md)。
